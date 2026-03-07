@@ -1,9 +1,9 @@
 # Global Development Rules: Rust Lineage-like MMORPG
 
 ## 0. MVP Phase (Whiteboxing) STRICT CONSTRAINT
-- **NO ART ASSETS**: Do NOT generate, request, or reference any external image files (`.png`, `.jpg`, `.aseprite`) or pixel art.
-- **USE PRIMITIVES**: All entities (players, enemies, walls) MUST be rendered using Bevy's built-in colored shapes (e.g., `SpriteBundle` with a basic solid color like `Color::srgb(0.0, 0.0, 1.0)` for the player). 
-- **FOCUS ON LOGIC**: Prioritize networking, ECS data flow, and server authority over visual fidelity.
+- **PHASE 1 ART ALLOWED**: Whitebox-only rendering is lifted from Phase 1 onward. Client-side `asset_server.load()` and `client/assets/` textures are allowed.
+- **SERVER STAYS HEADLESS**: Art assets must never be required by `server/`.
+- **FOCUS ON LOGIC + FEEDBACK**: Keep server authority first, and treat visuals as client feedback.
 
 
 ## 1. Tech Stack & Versions

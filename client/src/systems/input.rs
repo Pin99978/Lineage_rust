@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use shared::protocol::{AttackIntent, LootIntent, MoveIntent};
 use shared::{EquipmentSlot, Health, ItemType, SpellType};
 
-use crate::{network, Player};
+use crate::{network, systems::animation, Player};
 
 #[allow(clippy::too_many_arguments)]
 pub fn capture_movement_intent(
@@ -12,6 +12,7 @@ pub fn capture_movement_intent(
     camera_query: Query<(&Camera, &GlobalTransform)>,
     network: Option<Res<network::ClientNetwork>>,
     player_query: Query<&Transform, With<Player>>,
+    mut attack_animation: MessageWriter<animation::PlayAttackAnimation>,
     lootables: Query<(&Transform, &network::NetworkEntityVisual), With<network::Lootable>>,
     attackables: Query<
         (&Transform, &network::NetworkEntityVisual, &Health),
@@ -36,11 +37,19 @@ pub fn capture_movement_intent(
                 .map(|(_, visual, _)| visual.id);
 
             network::cast_spell_by_hotkey(&network, SpellType::Fireball, target);
+            attack_animation.write(animation::PlayAttackAnimation {
+                target_id: target,
+                local_player: true,
+            });
         }
     }
 
     if keyboard.just_pressed(KeyCode::Digit2) {
         network::cast_spell_by_hotkey(&network, SpellType::Heal, None);
+        attack_animation.write(animation::PlayAttackAnimation {
+            target_id: None,
+            local_player: true,
+        });
     }
 
     if keyboard.just_pressed(KeyCode::KeyE) {
@@ -92,6 +101,10 @@ pub fn capture_movement_intent(
 
     if let Some(target_id) = clicked_target {
         network::send_attack_intent(&network, AttackIntent { target_id });
+        attack_animation.write(animation::PlayAttackAnimation {
+            target_id: Some(target_id),
+            local_player: true,
+        });
     } else {
         network::send_move_intent(
             &network,

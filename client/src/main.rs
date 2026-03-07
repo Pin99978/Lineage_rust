@@ -1,3 +1,4 @@
+use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use shared::{Health, MovementComponentsPlugin, Position};
 
@@ -23,7 +24,15 @@ fn main() {
         .insert_resource(systems::ui::HudState::default())
         .add_message::<systems::combat_render::DamagePopupEvent>()
         .add_message::<systems::combat_render::DeathVisualEvent>()
-        .add_systems(Startup, (setup_camera, network::setup_network))
+        .add_message::<systems::animation::PlayAttackAnimation>()
+        .add_systems(
+            Startup,
+            (
+                setup_camera,
+                network::setup_network,
+                systems::animation::setup_character_visual_assets,
+            ),
+        )
         .add_systems(
             OnEnter(systems::ui::AppState::LoginMenu),
             systems::ui::setup_login_menu,
@@ -43,6 +52,12 @@ fn main() {
                 systems::ui::login_submit_system.run_if(in_state(systems::ui::AppState::LoginMenu)),
                 systems::input::capture_movement_intent
                     .run_if(in_state(systems::ui::AppState::InGame)),
+                systems::animation::attach_animation_components,
+                systems::animation::apply_character_atlas_when_ready,
+                systems::animation::trigger_attack_animation,
+                systems::animation::update_animation_state,
+                systems::animation::animate_sprite_system,
+                systems::animation::update_static_character_visual,
                 systems::combat_render::attach_world_health_bars,
                 systems::ui::update_player_health_hud,
                 systems::ui::update_player_mana_hud,
@@ -59,11 +74,21 @@ fn main() {
         .run();
 }
 
-fn setup(mut commands: Commands) {
+fn setup(mut commands: Commands, asset_server: Option<Res<AssetServer>>) {
     commands.spawn((
+        Name::new("FallbackBackground"),
         Sprite::from_color(Color::srgb(0.16, 0.16, 0.18), Vec2::new(2000.0, 2000.0)),
-        Transform::from_xyz(0.0, 0.0, -100.0),
+        Transform::from_xyz(0.0, 0.0, -120.0),
     ));
+
+    if let Some(asset_server) = asset_server {
+        let map_bg: Handle<Image> = asset_server.load("textures/map_bg.png");
+        commands.spawn((
+            Name::new("MapBackground"),
+            Sprite::from_image(map_bg),
+            Transform::from_xyz(0.0, 0.0, -110.0),
+        ));
+    }
 
     commands.spawn((
         Player,
@@ -76,5 +101,5 @@ fn setup(mut commands: Commands) {
 }
 
 fn setup_camera(mut commands: Commands) {
-    commands.spawn(Camera2d);
+    commands.spawn((Camera2d, Bloom::NATURAL));
 }

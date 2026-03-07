@@ -121,6 +121,7 @@ pub fn receive_server_state(
     )>,
     mut damage_feedback: MessageWriter<systems::combat_render::DamagePopupEvent>,
     mut death_feedback: MessageWriter<systems::combat_render::DeathVisualEvent>,
+    mut attack_animation: MessageWriter<systems::animation::PlayAttackAnimation>,
 ) {
     let Some(network) = network else {
         return;
@@ -190,6 +191,10 @@ pub fn receive_server_state(
                 damage_feedback.write(systems::combat_render::DamagePopupEvent {
                     target_id: event.target_id,
                     amount: event.amount,
+                });
+                attack_animation.write(systems::animation::PlayAttackAnimation {
+                    target_id: Some(event.target_id),
+                    local_player: false,
                 });
             }
             ServerMessage::DeathEvent(event) => {
