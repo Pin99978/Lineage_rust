@@ -11,6 +11,7 @@ pub fn capture_click_intent(
     camera_query: Query<(&Camera, &GlobalTransform)>,
     network: Option<Res<network::ClientNetwork>>,
     chat_state: Option<Res<crate::systems::ui::chat::ChatUiState>>,
+    windows_state: Option<Res<crate::systems::ui::inventory::UiWindowsState>>,
     mut attack_animation: MessageWriter<animation::PlayAttackAnimation>,
     lootables: Query<(&Transform, &network::NetworkEntityVisual), With<network::Lootable>>,
     npcs: Query<(&Transform, &network::NetworkEntityVisual), With<network::NpcInteractable>>,
@@ -25,6 +26,13 @@ pub fn capture_click_intent(
     if chat_state
         .as_ref()
         .map(|state| state.focused)
+        .unwrap_or(false)
+    {
+        return;
+    }
+    if windows_state
+        .as_ref()
+        .map(|state| state.blocks_world_input())
         .unwrap_or(false)
     {
         return;

@@ -165,6 +165,7 @@ pub fn receive_client_messages(
                     &mut network,
                     &socket_clone,
                     &db_bridge.command_tx,
+                    &player_snapshot,
                     address,
                     requested,
                 );
@@ -304,6 +305,13 @@ fn handle_login_request(
     network: &mut ServerNetwork,
     socket: &UdpSocket,
     command_tx: &crossbeam_channel::Sender<db::DbCommand>,
+    player_snapshot: &Query<(
+        &Position,
+        &Health,
+        &Mana,
+        &shared::Inventory,
+        &shared::EquipmentMap,
+    )>,
     address: SocketAddr,
     username: String,
 ) {
@@ -350,6 +358,9 @@ fn handle_login_request(
             if let Ok(payload) = encode_server_message(&assigned) {
                 let _ = socket.send_to(&payload, address);
             }
+            if let Some(entity) = resumed.entity {
+                send_player_snapshot(socket, address, player_id, entity, player_snapshot);
+            }
         }
         return;
     }
@@ -373,6 +384,9 @@ fn handle_login_request(
             if let Ok(payload) = encode_server_message(&assigned) {
                 let _ = socket.send_to(&payload, address);
             }
+            if let Some(entity) = session.entity {
+                send_player_snapshot(socket, address, player_id, entity, player_snapshot);
+            }
         }
         return;
     }
@@ -395,6 +409,52 @@ fn handle_login_request(
             message: "database offline".to_string(),
         });
         if let Ok(payload) = encode_server_message(&message) {
+            let _ = socket.send_to(&payload, address);
+        }
+    }
+}
+
+fn send_player_snapshot(
+    socket: &UdpSocket,
+    address: SocketAddr,
+    player_id: u64,
+    player_entity: Entity,
+    player_snapshot: &Query<(
+        &Position,
+        &Health,
+        &Mana,
+        &shared::Inventory,
+        &shared::EquipmentMap,
+    )>,
+) {
+    let Ok((_, _, mana, inventory, equipment)) = player_snapshot.get(player_entity) else {
+        return;
+    };
+
+    let mana_message = ServerMessage::ManaUpdate(ManaUpdate {
+        player_id,
+        current: mana.current,
+        max: mana.max.max(1),
+    });
+    if let Ok(payload) = encode_server_message(&mana_message) {
+        let _ = socket.send_to(&payload, address);
+    }
+
+    let equipment_message = ServerMessage::EquipmentUpdate(EquipmentUpdate {
+        player_id,
+        equipment: equipment.clone(),
+    });
+    if let Ok(payload) = encode_server_message(&equipment_message) {
+        let _ = socket.send_to(&payload, address);
+    }
+
+    for (item_type, amount) in &inventory.items {
+        let inventory_message = ServerMessage::InventoryUpdate(InventoryUpdate {
+            player_id,
+            item_type: *item_type,
+            amount: *amount,
+        });
+        if let Ok(payload) = encode_server_message(&inventory_message) {
             let _ = socket.send_to(&payload, address);
         }
     }
@@ -479,6 +539,7 @@ pub fn apply_db_results(
                 }
 
                 let player_id = network.allocate_entity_id();
+                let inventory_items = data.inventory.items.clone();
                 let mut combat_stats = CombatStats {
                     attack_power: 25,
                     attack_range: 90.0,
@@ -561,6 +622,17 @@ pub fn apply_db_results(
                 });
                 if let Ok(payload) = encode_server_message(&equipment_message) {
                     let _ = network.socket.send_to(&payload, address);
+                }
+
+                for (item_type, amount) in inventory_items {
+                    let inventory_message = ServerMessage::InventoryUpdate(InventoryUpdate {
+                        player_id,
+                        item_type,
+                        amount,
+                    });
+                    if let Ok(payload) = encode_server_message(&inventory_message) {
+                        let _ = network.socket.send_to(&payload, address);
+                    }
                 }
             }
             db::DbResult::LoginFailed { address, message } => {

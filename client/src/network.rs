@@ -113,6 +113,8 @@ pub fn receive_server_state(
     mut next_state: Option<ResMut<NextState<systems::ui::AppState>>>,
     mut login_name: Option<ResMut<systems::ui::LoginName>>,
     hud_state: Option<ResMut<systems::ui::HudState>>,
+    inventory_state: Option<ResMut<systems::ui::inventory::LocalInventoryState>>,
+    equipment_state: Option<ResMut<systems::ui::paperdoll::LocalEquipmentState>>,
     local_player: Option<ResMut<LocalPlayer>>,
     entity_map: Option<ResMut<NetworkEntityMap>>,
     mut state_queries: ParamSet<(
@@ -149,6 +151,12 @@ pub fn receive_server_state(
     let Some(mut hud_state) = hud_state else {
         return;
     };
+    let Some(mut inventory_state) = inventory_state else {
+        return;
+    };
+    let Some(mut equipment_state) = equipment_state else {
+        return;
+    };
     let Some(mut entity_map) = entity_map else {
         return;
     };
@@ -181,6 +189,9 @@ pub fn receive_server_state(
             }
             ServerMessage::AssignedPlayer { player_id } => {
                 local_player.id = Some(player_id);
+                inventory_state.items.clear();
+                equipment_state.weapon = None;
+                equipment_state.armor = None;
                 let mut player_query = state_queries.p0();
                 let Ok((player_entity, _, _, _)) = player_query.single_mut() else {
                     continue;
@@ -239,7 +250,12 @@ pub fn receive_server_state(
             }
             ServerMessage::InventoryUpdate(event) => {
                 if local_player.id == Some(event.player_id) {
-                    info!("picked up {:?}, total {}", event.item_type, event.amount);
+                    if event.amount == 0 {
+                        inventory_state.items.remove(&event.item_type);
+                    } else {
+                        inventory_state.items.insert(event.item_type, event.amount);
+                    }
+                    info!("inventory {:?} => {}", event.item_type, event.amount);
                 }
             }
             ServerMessage::ManaUpdate(event) => {
@@ -252,6 +268,8 @@ pub fn receive_server_state(
             ServerMessage::EquipmentUpdate(event) => {
                 if local_player.id == Some(event.player_id) {
                     hud_state.equipment = event.equipment.clone();
+                    equipment_state.weapon = event.equipment.weapon;
+                    equipment_state.armor = event.equipment.armor;
                     info!(
                         "equipment changed: weapon={:?} armor={:?}",
                         event.equipment.weapon, event.equipment.armor

@@ -8,6 +8,7 @@ pub fn capture_movement_intent(
     keyboard: Res<ButtonInput<KeyCode>>,
     network: Option<Res<network::ClientNetwork>>,
     chat_state: Option<Res<crate::systems::ui::chat::ChatUiState>>,
+    windows_state: Option<Res<crate::systems::ui::inventory::UiWindowsState>>,
     player_query: Query<&Transform, With<Player>>,
     mut attack_animation: MessageWriter<animation::PlayAttackAnimation>,
     attackables: Query<
@@ -21,6 +22,13 @@ pub fn capture_movement_intent(
     if chat_state
         .as_ref()
         .map(|state| state.focused)
+        .unwrap_or(false)
+    {
+        return;
+    }
+    if windows_state
+        .as_ref()
+        .map(|state| state.blocks_world_input())
         .unwrap_or(false)
     {
         return;

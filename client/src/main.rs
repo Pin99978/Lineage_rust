@@ -24,6 +24,9 @@ fn main() {
         .insert_resource(systems::ui::HudState::default())
         .insert_resource(systems::ui::DialogState::default())
         .insert_resource(systems::ui::chat::ChatUiState::default())
+        .insert_resource(systems::ui::inventory::LocalInventoryState::default())
+        .insert_resource(systems::ui::paperdoll::LocalEquipmentState::default())
+        .insert_resource(systems::ui::inventory::UiWindowsState::default())
         .add_message::<systems::combat_render::DamagePopupEvent>()
         .add_message::<systems::combat_render::DeathVisualEvent>()
         .add_message::<systems::animation::PlayAttackAnimation>()
@@ -56,6 +59,10 @@ fn main() {
                     .run_if(in_state(systems::ui::AppState::InGame)),
                 systems::ui::chat::chat_text_input_system
                     .run_if(in_state(systems::ui::AppState::InGame)),
+                systems::ui::inventory::toggle_inventory_window_system
+                    .run_if(in_state(systems::ui::AppState::InGame)),
+                systems::ui::paperdoll::toggle_paperdoll_window_system
+                    .run_if(in_state(systems::ui::AppState::InGame)),
                 systems::interaction::capture_click_intent
                     .run_if(in_state(systems::ui::AppState::InGame)),
                 systems::input::capture_movement_intent
@@ -78,6 +85,12 @@ fn main() {
                 systems::ui::update_equipment_text_hud,
                 systems::ui::update_dialog_hud,
                 systems::ui::chat::update_chat_ui_system,
+                systems::ui::inventory::apply_inventory_visibility_system,
+                systems::ui::paperdoll::apply_paperdoll_visibility_system,
+                systems::ui::inventory::refresh_inventory_ui_system,
+                systems::ui::paperdoll::refresh_paperdoll_ui_system,
+                systems::ui::inventory::inventory_click_equip_system,
+                systems::ui::paperdoll::paperdoll_click_unequip_system,
             )
                 .chain(),
         )

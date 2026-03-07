@@ -5,6 +5,8 @@ use shared::{EquipmentMap, Health};
 use crate::{network, Player};
 
 pub mod chat;
+pub mod inventory;
+pub mod paperdoll;
 
 #[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AppState {
@@ -259,6 +261,8 @@ pub fn setup_ui(mut commands: Commands) {
     ));
 
     chat::setup_chat_ui(&mut commands);
+    inventory::setup_inventory_ui(&mut commands);
+    paperdoll::setup_paperdoll_ui(&mut commands);
 }
 
 pub fn update_player_health_hud(

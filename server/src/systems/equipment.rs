@@ -5,7 +5,7 @@ use shared::{
     ItemType,
 };
 
-use crate::network;
+use crate::{network, systems::loot};
 
 #[derive(Message, Debug, Clone, Copy)]
 pub struct EquipRequest {
@@ -38,6 +38,7 @@ pub fn equip_system(
         With<network::PlayerCharacter>,
     >,
     mut changed: MessageWriter<EquipmentChangedMessage>,
+    mut inventory_updates: MessageWriter<loot::InventoryUpdateMessage>,
 ) {
     for request in requests.read() {
         let Ok((network_entity, mut inventory, mut equipment, mut stats, mut armor)) =
@@ -69,11 +70,21 @@ pub fn equip_system(
 
         *equipped_item = Some(request.item_type);
         decrement_item(&mut inventory, request.item_type, 1);
+        let total = inventory
+            .items
+            .get(&request.item_type)
+            .copied()
+            .unwrap_or(0);
         recalculate_stats_from_equipment(&equipment, &mut stats, &mut armor);
 
         changed.write(EquipmentChangedMessage {
             player_id: network_entity.id,
             equipment: equipment.clone(),
+        });
+        inventory_updates.write(loot::InventoryUpdateMessage {
+            player_id: network_entity.id,
+            item_type: request.item_type,
+            amount: total,
         });
     }
 }
@@ -91,6 +102,7 @@ pub fn unequip_system(
         With<network::PlayerCharacter>,
     >,
     mut changed: MessageWriter<EquipmentChangedMessage>,
+    mut inventory_updates: MessageWriter<loot::InventoryUpdateMessage>,
 ) {
     for request in requests.read() {
         let Ok((network_entity, mut inventory, mut equipment, mut stats, mut armor)) =
@@ -108,10 +120,16 @@ pub fn unequip_system(
         };
 
         *inventory.items.entry(item_type).or_insert(0) += 1;
+        let total = inventory.items.get(&item_type).copied().unwrap_or(0);
         recalculate_stats_from_equipment(&equipment, &mut stats, &mut armor);
         changed.write(EquipmentChangedMessage {
             player_id: network_entity.id,
             equipment: equipment.clone(),
+        });
+        inventory_updates.write(loot::InventoryUpdateMessage {
+            player_id: network_entity.id,
+            item_type,
+            amount: total,
         });
     }
 }
