@@ -5,8 +5,8 @@ use shared::protocol::{
     LoginRequest, LoginResponse, LootIntent, ManaUpdate, NetworkEntityKind, ServerMessage,
 };
 use shared::{
-    ActionState, ArmorClass, CombatStats, Health, Mana, MoveSpeed, Position, SpellCooldowns,
-    TargetPosition,
+    ActionState, ArmorClass, CombatStats, Health, Mana, MoveSpeed, PathQueue, Position,
+    SpellCooldowns, TargetPosition,
 };
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
@@ -14,7 +14,7 @@ use std::time::Instant;
 
 use crate::{
     db,
-    systems::{chat, combat, drop, equipment, interaction, loot, spell},
+    systems::{chat, combat, drop, equipment, interaction, loot, movement, spell},
 };
 
 const SERVER_BIND_ADDR: &str = "127.0.0.1:5000";
@@ -102,6 +102,7 @@ pub fn receive_client_messages(
     mut unequip_requests: MessageWriter<equipment::UnequipRequest>,
     mut interact_requests: MessageWriter<interaction::InteractRequest>,
     mut chat_requests: MessageWriter<chat::ChatRequest>,
+    mut move_requests: MessageWriter<movement::MoveRequest>,
 ) {
     let Some(mut network) = network else {
         return;
@@ -179,9 +180,10 @@ pub fn receive_client_messages(
                     continue;
                 }
                 if let Some(player_entity) = session.entity {
-                    commands.entity(player_entity).insert(TargetPosition {
-                        x: intent.target_x,
-                        y: intent.target_y,
+                    move_requests.write(movement::MoveRequest {
+                        mover_entity: player_entity,
+                        target_x: intent.target_x,
+                        target_y: intent.target_y,
                     });
                 }
             }
@@ -579,6 +581,7 @@ pub fn apply_db_results(
                         combat_stats,
                         SpellCooldowns::default(),
                         ActionState::default(),
+                        PathQueue::default(),
                         data.inventory,
                         data.equipment.clone(),
                     ))

@@ -1,79 +1,162 @@
 use bevy::prelude::*;
-use shared::{MoveSpeed, Position, TargetPosition};
+use pathfinding::directed::astar::astar;
+use shared::{MoveSpeed, PathQueue, Position, TargetPosition};
+use std::collections::VecDeque;
 
-const WORLD_HALF_EXTENT_X: f32 = 950.0;
-const WORLD_HALF_EXTENT_Y: f32 = 950.0;
-const OBSTACLE_MIN_X: f32 = -140.0;
-const OBSTACLE_MAX_X: f32 = 140.0;
-const OBSTACLE_MIN_Y: f32 = -100.0;
-const OBSTACLE_MAX_Y: f32 = 100.0;
+use crate::map_data::CollisionGrid;
+
+#[derive(Message, Debug, Clone, Copy)]
+pub struct MoveRequest {
+    pub mover_entity: Entity,
+    pub target_x: f32,
+    pub target_y: f32,
+}
+
+pub fn process_move_requests(
+    grid: Option<Res<CollisionGrid>>,
+    mut requests: MessageReader<MoveRequest>,
+    mut movers: Query<(&Position, &mut TargetPosition, &mut PathQueue)>,
+) {
+    let Some(grid) = grid else {
+        return;
+    };
+
+    for request in requests.read() {
+        let Ok((position, mut target, mut queue)) = movers.get_mut(request.mover_entity) else {
+            continue;
+        };
+
+        let start = Vec2::new(position.x, position.y);
+        let requested_target = Vec2::new(request.target_x, request.target_y);
+
+        if let Some(path) = compute_path_world(&grid, start, requested_target) {
+            queue.waypoints = path;
+            if let Some(first) = queue.waypoints.front() {
+                target.x = first.x;
+                target.y = first.y;
+            } else {
+                target.x = position.x;
+                target.y = position.y;
+            }
+        } else {
+            queue.waypoints.clear();
+            target.x = position.x;
+            target.y = position.y;
+        }
+    }
+}
 
 pub fn movement_system(
     time: Res<Time>,
-    mut query: Query<(&mut Position, &TargetPosition, &MoveSpeed)>,
+    mut query: Query<(
+        &mut Position,
+        &mut TargetPosition,
+        &MoveSpeed,
+        &mut PathQueue,
+    )>,
 ) {
-    for (mut position, target, speed) in &mut query {
+    for (mut position, mut target, speed, mut queue) in &mut query {
+        if queue.waypoints.is_empty() {
+            continue;
+        }
+
+        let Some(next_waypoint) = queue.waypoints.front().copied() else {
+            continue;
+        };
+        target.x = next_waypoint.x;
+        target.y = next_waypoint.y;
+
         let to_target = Vec2::new(target.x - position.x, target.y - position.y);
         let distance = to_target.length();
-
-        if distance <= f32::EPSILON {
+        if distance <= 0.75 {
+            queue.waypoints.pop_front();
+            if let Some(next) = queue.waypoints.front() {
+                target.x = next.x;
+                target.y = next.y;
+            } else {
+                target.x = position.x;
+                target.y = position.y;
+            }
             continue;
         }
 
         let max_step = speed.value * time.delta_secs();
         let step = distance.min(max_step);
         let direction = to_target / distance;
-        let current_position = Vec2::new(position.x, position.y);
-        let desired_position = current_position + direction * step;
-        let next_position = resolve_walkable_position(current_position, desired_position);
 
-        position.x = next_position.x;
-        position.y = next_position.y;
+        position.x += direction.x * step;
+        position.y += direction.y * step;
     }
 }
 
-fn resolve_walkable_position(current: Vec2, desired: Vec2) -> Vec2 {
-    let clamped = clamp_to_world_bounds(desired);
-    if is_inside_obstacle(current) {
-        return clamped;
+pub fn compute_path_world(
+    grid: &CollisionGrid,
+    from: Vec2,
+    to: Vec2,
+) -> Option<VecDeque<Position>> {
+    let start_cell = grid.world_to_cell(from)?;
+    let end_cell = grid.world_to_cell(to)?;
+    let walkable_start = if grid.is_cell_blocked(start_cell) {
+        grid.nearest_walkable(start_cell)?
+    } else {
+        start_cell
+    };
+    let walkable_end = grid.nearest_walkable(end_cell)?;
+
+    let path_cells = astar(
+        &walkable_start,
+        |cell| successors(grid, *cell),
+        |cell| heuristic(*cell, walkable_end),
+        |cell| *cell == walkable_end,
+    )
+    .map(|(path, _)| path)?;
+
+    let mut waypoints = VecDeque::new();
+    for cell in path_cells.into_iter().skip(1) {
+        let waypoint = grid.cell_to_world_center(cell);
+        waypoints.push_back(Position {
+            x: waypoint.x,
+            y: waypoint.y,
+        });
     }
+    Some(waypoints)
+}
 
-    if !is_inside_obstacle(clamped) {
-        return clamped;
-    }
+fn successors(grid: &CollisionGrid, node: IVec2) -> Vec<(IVec2, u32)> {
+    const DIRS: &[(i32, i32, u32)] = &[
+        (-1, 0, 10),
+        (1, 0, 10),
+        (0, -1, 10),
+        (0, 1, 10),
+        (-1, -1, 14),
+        (-1, 1, 14),
+        (1, -1, 14),
+        (1, 1, 14),
+    ];
 
-    let slide_x = clamp_to_world_bounds(Vec2::new(clamped.x, current.y));
-    let slide_y = clamp_to_world_bounds(Vec2::new(current.x, clamped.y));
-
-    let x_walkable = !is_inside_obstacle(slide_x);
-    let y_walkable = !is_inside_obstacle(slide_y);
-
-    match (x_walkable, y_walkable) {
-        (true, true) => {
-            let x_distance = (clamped - slide_x).length_squared();
-            let y_distance = (clamped - slide_y).length_squared();
-            if x_distance <= y_distance {
-                slide_x
-            } else {
-                slide_y
+    let mut out = Vec::with_capacity(8);
+    for (dx, dy, cost) in DIRS {
+        let next = IVec2::new(node.x + dx, node.y + dy);
+        if !grid.in_bounds(next) || grid.is_cell_blocked(next) {
+            continue;
+        }
+        // Prevent diagonal corner cutting through two blocked cardinal cells.
+        if *dx != 0 && *dy != 0 {
+            let side_a = IVec2::new(node.x + dx, node.y);
+            let side_b = IVec2::new(node.x, node.y + dy);
+            if grid.is_cell_blocked(side_a) && grid.is_cell_blocked(side_b) {
+                continue;
             }
         }
-        (true, false) => slide_x,
-        (false, true) => slide_y,
-        (false, false) => current,
+        out.push((next, *cost));
     }
+    out
 }
 
-fn clamp_to_world_bounds(position: Vec2) -> Vec2 {
-    Vec2::new(
-        position.x.clamp(-WORLD_HALF_EXTENT_X, WORLD_HALF_EXTENT_X),
-        position.y.clamp(-WORLD_HALF_EXTENT_Y, WORLD_HALF_EXTENT_Y),
-    )
-}
-
-fn is_inside_obstacle(position: Vec2) -> bool {
-    position.x >= OBSTACLE_MIN_X
-        && position.x <= OBSTACLE_MAX_X
-        && position.y >= OBSTACLE_MIN_Y
-        && position.y <= OBSTACLE_MAX_Y
+fn heuristic(from: IVec2, to: IVec2) -> u32 {
+    let dx = (from.x - to.x).unsigned_abs();
+    let dy = (from.y - to.y).unsigned_abs();
+    let diagonal = dx.min(dy);
+    let straight = dx.max(dy) - diagonal;
+    diagonal * 14 + straight * 10
 }

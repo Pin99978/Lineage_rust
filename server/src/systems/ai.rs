@@ -1,12 +1,26 @@
 use bevy::prelude::*;
 use shared::{
-    AggroRange, AiState, AttackCooldown, CombatStats, Health, LootTable, Position, TargetPosition,
+    AggroRange, AiState, AttackCooldown, CombatStats, Health, LootTable, PathQueue, Position,
+    TargetPosition,
 };
 
-use crate::{network, systems::combat};
+use crate::{map_data::CollisionGrid, network, systems::combat, systems::movement};
 
 #[derive(Component)]
 pub struct EnemyAi;
+
+#[derive(Component, Debug, Clone)]
+pub struct EnemyPathRepathTimer {
+    pub timer: Timer,
+}
+
+impl Default for EnemyPathRepathTimer {
+    fn default() -> Self {
+        Self {
+            timer: Timer::from_seconds(0.8, TimerMode::Repeating),
+        }
+    }
+}
 
 pub fn spawn_enemy_at(
     commands: &mut Commands,
@@ -42,6 +56,8 @@ pub fn spawn_enemy_at(
         AggroRange(300.0),
         AiState::Idle,
         AttackCooldown::default(),
+        PathQueue::default(),
+        EnemyPathRepathTimer::default(),
     ));
     entity.id()
 }
@@ -99,6 +115,8 @@ pub fn ai_chase_and_attack_system(
             &mut AiState,
             &mut TargetPosition,
             &mut AttackCooldown,
+            &mut PathQueue,
+            &mut EnemyPathRepathTimer,
         ),
         (With<EnemyAi>, Without<network::PlayerCharacter>),
     >,
@@ -108,7 +126,12 @@ pub fn ai_chase_and_attack_system(
     >,
     mut damage_events: MessageWriter<combat::CombatDamageEvent>,
     mut death_events: MessageWriter<combat::CombatDeathEvent>,
+    grid: Option<Res<CollisionGrid>>,
 ) {
+    let Some(grid) = grid else {
+        return;
+    };
+
     for (
         enemy_position,
         aggro_range,
@@ -117,13 +140,17 @@ pub fn ai_chase_and_attack_system(
         mut ai_state,
         mut target_position,
         mut cooldown,
+        mut path_queue,
+        mut repath_timer,
     ) in &mut enemies
     {
         if enemy_health.current <= 0 {
             *ai_state = AiState::Idle;
+            path_queue.waypoints.clear();
             continue;
         }
         cooldown.remaining_secs = (cooldown.remaining_secs - time.delta_secs()).max(0.0);
+        repath_timer.timer.tick(time.delta());
 
         let target_entity = match *ai_state {
             AiState::Chasing(target) | AiState::Attacking(target) => target,
@@ -134,11 +161,13 @@ pub fn ai_chase_and_attack_system(
             players.get_mut(target_entity)
         else {
             *ai_state = AiState::Idle;
+            path_queue.waypoints.clear();
             continue;
         };
 
         if player_health.current <= 0 {
             *ai_state = AiState::Idle;
+            path_queue.waypoints.clear();
             continue;
         }
 
@@ -149,6 +178,7 @@ pub fn ai_chase_and_attack_system(
         let distance = to_player.length();
         if distance > aggro_range.0 * 1.5 {
             *ai_state = AiState::Idle;
+            path_queue.waypoints.clear();
             continue;
         }
 
@@ -156,6 +186,7 @@ pub fn ai_chase_and_attack_system(
             *ai_state = AiState::Attacking(target_entity);
             target_position.x = enemy_position.x;
             target_position.y = enemy_position.y;
+            path_queue.waypoints.clear();
 
             if cooldown.remaining_secs > 0.0 {
                 continue;
@@ -178,8 +209,32 @@ pub fn ai_chase_and_attack_system(
             }
         } else {
             *ai_state = AiState::Chasing(target_entity);
-            target_position.x = player_position.x;
-            target_position.y = player_position.y;
+            if !repath_timer.timer.just_finished() && !path_queue.waypoints.is_empty() {
+                if let Some(next) = path_queue.waypoints.front() {
+                    target_position.x = next.x;
+                    target_position.y = next.y;
+                }
+                continue;
+            }
+
+            let from = Vec2::new(enemy_position.x, enemy_position.y);
+            let to = Vec2::new(player_position.x, player_position.y);
+            let Some(new_path) = movement::compute_path_world(&grid, from, to) else {
+                *ai_state = AiState::Idle;
+                path_queue.waypoints.clear();
+                continue;
+            };
+            if new_path.len() > 64 {
+                *ai_state = AiState::Idle;
+                path_queue.waypoints.clear();
+                continue;
+            }
+
+            path_queue.waypoints = new_path;
+            if let Some(next) = path_queue.waypoints.front() {
+                target_position.x = next.x;
+                target_position.y = next.y;
+            }
         }
     }
 }

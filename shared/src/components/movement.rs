@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use std::collections::VecDeque;
 
 #[derive(Component, Default, Debug, Clone, Copy, PartialEq, Reflect)]
 #[reflect(Component, Default)]
@@ -18,4 +19,9 @@ pub struct TargetPosition {
 #[reflect(Component, Default)]
 pub struct MoveSpeed {
     pub value: f32,
+}
+
+#[derive(Component, Default, Debug, Clone)]
+pub struct PathQueue {
+    pub waypoints: VecDeque<Position>,
 }

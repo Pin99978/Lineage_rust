@@ -329,7 +329,7 @@ fn apply_entity_state(
 ) {
     if local_player.id == Some(state.entity_id) {
         let mut player_query = state_queries.p0();
-        let Ok((player_entity, mut position, mut health, sprite)) = player_query.single_mut()
+        let Ok((player_entity, mut position, mut health, _sprite)) = player_query.single_mut()
         else {
             return;
         };
@@ -361,7 +361,7 @@ fn apply_entity_state(
 
     if let Some(existing_entity) = entity_map.entity_by_id.get(&state.entity_id).copied() {
         let mut visuals_query = state_queries.p1();
-        if let Ok((_, _, mut position, mut health, sprite, _, _, _)) =
+        if let Ok((_, _, mut position, mut health, _sprite, _, _, _)) =
             visuals_query.get_mut(existing_entity)
         {
             position.x = state.x;

@@ -11,7 +11,7 @@ pub use components::item::{
     item_modifier, item_slot, EquipmentMap, EquipmentSlot, GroundItem, Inventory, ItemType,
     LootDropEntry, LootTable, StatModifier,
 };
-pub use components::movement::{MoveSpeed, Position, TargetPosition};
+pub use components::movement::{MoveSpeed, PathQueue, Position, TargetPosition};
 pub use components::npc::{Npc, NpcMarker, NpcType};
 pub use components::world::{SpawnType, Spawner};
 

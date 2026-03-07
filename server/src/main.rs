@@ -32,6 +32,7 @@ fn main() {
         .add_message::<systems::interaction::DialogMessage>()
         .add_message::<systems::chat::ChatRequest>()
         .add_message::<systems::chat::ChatDelivery>()
+        .add_message::<systems::movement::MoveRequest>()
         .add_systems(
             Startup,
             (
@@ -47,6 +48,7 @@ fn main() {
                 network::receive_client_messages,
                 network::cleanup_stale_sessions,
                 network::apply_db_results,
+                systems::movement::process_move_requests,
                 systems::spawner::spawner_system,
                 systems::ai::ai_aggro_system,
                 systems::ai::ai_chase_and_attack_system,
