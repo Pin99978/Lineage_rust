@@ -337,13 +337,6 @@ fn apply_entity_state(
         position.y = state.y;
         health.current = state.health_current;
         health.max = state.health_max;
-        if let Some(mut sprite) = sprite {
-            sprite.color = if state.alive {
-                systems::render::color_for_network_kind(NetworkEntityKind::Player)
-            } else {
-                Color::srgb(0.35, 0.35, 0.35)
-            };
-        }
         entity_map
             .entity_by_id
             .insert(state.entity_id, player_entity);
@@ -375,13 +368,6 @@ fn apply_entity_state(
             position.y = state.y;
             health.current = state.health_current;
             health.max = state.health_max;
-            if let Some(mut sprite) = sprite {
-                sprite.color = if state.alive {
-                    systems::render::color_for_network_kind(state.kind)
-                } else {
-                    Color::srgb(0.35, 0.35, 0.35)
-                };
-            }
             return;
         }
         warn!(

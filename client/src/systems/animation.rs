@@ -321,6 +321,10 @@ pub fn animate_sprite_system(
         let row =
             state_offset * config.directions + controller.direction_row.min(config.directions - 1);
         texture_atlas.index = row * config.frames_per_state + controller.current_frame;
+
+        if !matches!(state, CharacterState::Dead) {
+            sprite.color = Color::WHITE;
+        }
     }
 }
 
@@ -392,5 +396,6 @@ fn is_checker_pixel(r: u8, g: u8, b: u8) -> bool {
     let low = r.min(g).min(b);
     let gray_like = drg <= 10 && dgb <= 10;
     let light_checker = (170..=245).contains(&base) && (160..=240).contains(&low);
-    gray_like && light_checker
+    let is_magenta = r > 200 && b > 200 && g < 80;
+    (gray_like && light_checker) || is_magenta
 }
