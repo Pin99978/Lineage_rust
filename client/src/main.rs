@@ -13,12 +13,18 @@ fn main() {
         .add_plugins(MovementComponentsPlugin)
         .add_message::<systems::combat_render::DamagePopupEvent>()
         .add_message::<systems::combat_render::DeathVisualEvent>()
-        .add_systems(Startup, (setup, network::setup_network))
+        .add_systems(
+            Startup,
+            (setup, network::setup_network, systems::ui::setup_ui),
+        )
         .add_systems(
             Update,
             (
                 systems::input::capture_movement_intent,
                 network::receive_server_state,
+                systems::combat_render::attach_world_health_bars,
+                systems::ui::update_player_health_hud,
+                systems::combat_render::update_world_health_bars,
                 systems::combat_render::apply_damage_feedback,
                 systems::combat_render::apply_death_feedback,
                 systems::movement::sync_transform_system,

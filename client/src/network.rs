@@ -78,20 +78,19 @@ pub fn receive_server_state(
     network: Option<Res<ClientNetwork>>,
     local_player: Option<ResMut<LocalPlayer>>,
     entity_map: Option<ResMut<NetworkEntityMap>>,
-    mut player_query: Query<
-        (Entity, &mut Position, &mut Health, Option<&mut Sprite>),
-        With<Player>,
-    >,
-    mut visuals_query: Query<
-        (
-            Entity,
-            &NetworkEntityVisual,
-            &mut Position,
-            &mut Health,
-            Option<&mut Sprite>,
-        ),
-        Without<Player>,
-    >,
+    mut state_queries: ParamSet<(
+        Query<(Entity, &mut Position, &mut Health, Option<&mut Sprite>), With<Player>>,
+        Query<
+            (
+                Entity,
+                &NetworkEntityVisual,
+                &mut Position,
+                &mut Health,
+                Option<&mut Sprite>,
+            ),
+            Without<Player>,
+        >,
+    )>,
     mut damage_feedback: MessageWriter<systems::combat_render::DamagePopupEvent>,
     mut death_feedback: MessageWriter<systems::combat_render::DeathVisualEvent>,
 ) {
@@ -117,6 +116,7 @@ pub fn receive_server_state(
         match message {
             ServerMessage::AssignedPlayer { player_id } => {
                 local_player.id = Some(player_id);
+                let mut player_query = state_queries.p0();
                 let Ok((player_entity, _, _, _)) = player_query.single_mut() else {
                     continue;
                 };
@@ -130,8 +130,7 @@ pub fn receive_server_state(
                     &mut commands,
                     &mut local_player,
                     &mut entity_map,
-                    &mut player_query,
-                    &mut visuals_query,
+                    &mut state_queries,
                     state,
                 );
             }
@@ -155,23 +154,23 @@ fn apply_entity_state(
     commands: &mut Commands,
     local_player: &mut LocalPlayer,
     entity_map: &mut NetworkEntityMap,
-    player_query: &mut Query<
-        (Entity, &mut Position, &mut Health, Option<&mut Sprite>),
-        With<Player>,
-    >,
-    visuals_query: &mut Query<
-        (
-            Entity,
-            &NetworkEntityVisual,
-            &mut Position,
-            &mut Health,
-            Option<&mut Sprite>,
-        ),
-        Without<Player>,
-    >,
+    state_queries: &mut ParamSet<(
+        Query<(Entity, &mut Position, &mut Health, Option<&mut Sprite>), With<Player>>,
+        Query<
+            (
+                Entity,
+                &NetworkEntityVisual,
+                &mut Position,
+                &mut Health,
+                Option<&mut Sprite>,
+            ),
+            Without<Player>,
+        >,
+    )>,
     state: EntityState,
 ) {
     if local_player.id == Some(state.entity_id) {
+        let mut player_query = state_queries.p0();
         let Ok((player_entity, mut position, mut health, sprite)) = player_query.single_mut()
         else {
             return;
@@ -194,6 +193,7 @@ fn apply_entity_state(
     }
 
     if let Some(existing_entity) = entity_map.entity_by_id.get(&state.entity_id).copied() {
+        let mut visuals_query = state_queries.p1();
         if let Ok((_, _, mut position, mut health, sprite)) = visuals_query.get_mut(existing_entity)
         {
             position.x = state.x;
