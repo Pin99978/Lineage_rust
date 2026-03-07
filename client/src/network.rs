@@ -4,7 +4,7 @@ use shared::protocol::{
     ClientMessage, EntityState, EquipIntent, InteractIntent, LoginRequest, LootIntent,
     NetworkEntityKind, ServerMessage, UnequipIntent, UseItemIntent,
 };
-use shared::{EquipmentSlot, Health, ItemType, Position, SpellType};
+use shared::{EquipmentSlot, Health, ItemType, Position, SpellType, MAP_TOWN};
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 
@@ -22,6 +22,7 @@ pub struct ClientNetwork {
 #[derive(Resource, Default)]
 pub struct LocalPlayer {
     pub id: Option<u64>,
+    pub map_id: String,
 }
 
 #[derive(Resource, Default)]
@@ -58,7 +59,10 @@ pub fn setup_network(mut commands: Commands) {
         socket,
         server_addr,
     });
-    commands.insert_resource(LocalPlayer::default());
+    commands.insert_resource(LocalPlayer {
+        id: None,
+        map_id: MAP_TOWN.to_string(),
+    });
     commands.insert_resource(NetworkEntityMap::default());
 }
 
@@ -214,6 +218,12 @@ pub fn receive_server_state(
                 if *app_state.get() == systems::ui::AppState::LoginMenu {
                     continue;
                 }
+                if local_player.id != Some(state.entity_id) && state.map_id != local_player.map_id {
+                    continue;
+                }
+                if local_player.id == Some(state.entity_id) {
+                    local_player.map_id = state.map_id.clone();
+                }
                 apply_entity_state(
                     &mut commands,
                     &mut local_player,
@@ -221,6 +231,16 @@ pub fn receive_server_state(
                     &mut state_queries,
                     state,
                 );
+            }
+            ServerMessage::MapChangeEvent(event) => {
+                local_player.map_id = event.map_id.clone();
+                clear_map_state(&mut commands, &mut entity_map, local_player.id);
+
+                let mut player_query = state_queries.p0();
+                if let Ok((_entity, mut position, _health, _sprite)) = player_query.single_mut() {
+                    position.x = event.x;
+                    position.y = event.y;
+                }
             }
             ServerMessage::DamageEvent(event) => {
                 damage_feedback.write(systems::combat_render::DamagePopupEvent {
@@ -475,4 +495,22 @@ fn is_loot_kind(kind: NetworkEntityKind) -> bool {
         kind,
         NetworkEntityKind::LootGold | NetworkEntityKind::LootHealthPotion
     )
+}
+
+fn clear_map_state(
+    commands: &mut Commands,
+    entity_map: &mut NetworkEntityMap,
+    keep_id: Option<u64>,
+) {
+    let to_clear: Vec<u64> = entity_map
+        .entity_by_id
+        .keys()
+        .copied()
+        .filter(|id| Some(*id) != keep_id)
+        .collect();
+    for id in to_clear {
+        if let Some(entity) = entity_map.entity_by_id.remove(&id) {
+            commands.entity(entity).despawn();
+        }
+    }
 }

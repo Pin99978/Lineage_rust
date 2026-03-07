@@ -1,6 +1,28 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
+pub const MAP_TOWN: &str = "Town";
+pub const MAP_DUNGEON_1: &str = "Dungeon1";
+
+#[derive(Component, Debug, Clone, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize)]
+#[reflect(Component)]
+pub struct MapId(pub String);
+
+impl Default for MapId {
+    fn default() -> Self {
+        Self(MAP_TOWN.to_string())
+    }
+}
+
+#[derive(Component, Debug, Clone, Reflect)]
+#[reflect(Component)]
+pub struct Portal {
+    pub target_map: String,
+    pub target_x: f32,
+    pub target_y: f32,
+    pub trigger_radius: f32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect, Serialize, Deserialize)]
 pub enum SpawnType {
     Enemy,

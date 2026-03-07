@@ -103,6 +103,7 @@ fn main() {
                 systems::combat_render::update_world_health_bars,
                 systems::combat_render::apply_damage_feedback,
                 systems::combat_render::apply_death_feedback,
+                systems::render::sync_map_background_system,
                 systems::movement::sync_transform_system,
                 systems::render::y_sorting_system,
                 systems::combat_render::animate_damage_popups,
@@ -120,10 +121,16 @@ fn setup(mut commands: Commands, asset_server: Option<Res<AssetServer>>) {
     ));
 
     if let Some(asset_server) = asset_server {
-        let map_bg: Handle<Image> = asset_server.load("textures/map_bg.png");
+        let town_bg: Handle<Image> = asset_server.load("textures/map_bg.png");
+        let dungeon_bg: Handle<Image> = asset_server.load("textures/map_bg.png");
+        commands.insert_resource(systems::render::MapBackgrounds {
+            town: town_bg.clone(),
+            dungeon_1: dungeon_bg.clone(),
+        });
         commands.spawn((
             Name::new("MapBackground"),
-            Sprite::from_image(map_bg),
+            systems::render::MapBackground,
+            Sprite::from_image(town_bg),
             Transform::from_xyz(0.0, 0.0, -10.0),
         ));
     }

@@ -30,6 +30,7 @@ fn main() {
         .add_message::<systems::equipment::EquipmentChangedMessage>()
         .add_message::<systems::interaction::InteractRequest>()
         .add_message::<systems::interaction::DialogMessage>()
+        .add_message::<systems::interaction::MapChangedMessage>()
         .add_message::<systems::chat::ChatRequest>()
         .add_message::<systems::chat::ChatDelivery>()
         .add_message::<systems::movement::MoveRequest>()
@@ -61,6 +62,7 @@ fn main() {
                 systems::spell::cast_spell_system,
                 systems::item::use_item_system,
                 systems::interaction::interaction_system,
+                systems::interaction::portal_system,
                 systems::chat::chat_system,
             )
                 .chain(),
@@ -79,6 +81,7 @@ fn main() {
         .add_systems(
             Update,
             (
+                network::broadcast_map_change_events,
                 network::broadcast_world_state,
                 network::broadcast_combat_events,
                 network::broadcast_item_events,

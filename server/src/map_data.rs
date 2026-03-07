@@ -1,5 +1,9 @@
 use bevy::prelude::*;
-use shared::{Npc, NpcMarker, NpcType, Position, SpawnType, Spawner, TargetPosition};
+use shared::{
+    MapId, Npc, NpcMarker, NpcType, Portal, Position, SpawnType, Spawner, TargetPosition,
+    MAP_DUNGEON_1, MAP_TOWN,
+};
+use std::collections::HashMap;
 
 use crate::network;
 
@@ -10,6 +14,21 @@ pub struct CollisionGrid {
     pub cell_size: f32,
     pub origin: Vec2,
     obstacles: Vec<bool>,
+}
+
+#[derive(Resource, Debug, Clone, Default)]
+pub struct MapManager {
+    pub grids: HashMap<String, CollisionGrid>,
+}
+
+impl MapManager {
+    pub fn insert(&mut self, map_id: impl Into<String>, grid: CollisionGrid) {
+        self.grids.insert(map_id.into(), grid);
+    }
+
+    pub fn grid_for(&self, map_id: &MapId) -> Option<&CollisionGrid> {
+        self.grids.get(&map_id.0)
+    }
 }
 
 impl CollisionGrid {
@@ -39,6 +58,23 @@ impl CollisionGrid {
             for y in 72..=80 {
                 grid.set_blocked(x, y, true);
             }
+        }
+        grid
+    }
+
+    pub fn dungeon_demo() -> Self {
+        let mut grid = Self::demo();
+        for x in 12..=88 {
+            grid.set_blocked(x, 18, true);
+            grid.set_blocked(x, 82, true);
+        }
+        for y in 18..=82 {
+            grid.set_blocked(12, y, true);
+            grid.set_blocked(88, y, true);
+        }
+        for y in 30..=70 {
+            grid.set_blocked(44, y, true);
+            grid.set_blocked(56, y, true);
         }
         grid
     }
@@ -114,7 +150,10 @@ pub fn setup_world_map(mut commands: Commands, network: Option<ResMut<network::S
     let Some(mut network) = network else {
         return;
     };
-    commands.insert_resource(CollisionGrid::demo());
+    let mut maps = MapManager::default();
+    maps.insert(MAP_TOWN, CollisionGrid::demo());
+    maps.insert(MAP_DUNGEON_1, CollisionGrid::dungeon_demo());
+    commands.insert_resource(maps);
 
     // Merchant NPC at town center.
     let npc_id = network.allocate_entity_id();
@@ -128,17 +167,26 @@ pub fn setup_world_map(mut commands: Commands, network: Option<ResMut<network::S
             id: npc_id,
             kind: shared::protocol::NetworkEntityKind::NpcMerchant,
         },
+        MapId(MAP_TOWN.to_string()),
         Position { x: 0.0, y: 0.0 },
         TargetPosition { x: 0.0, y: 0.0 },
     ));
 
-    // World spawners.
+    // World spawners (Town + Dungeon1).
     let configs = [
-        (Position { x: 180.0, y: 120.0 }, 130.0, 3, 2.0),
-        (Position { x: 260.0, y: -70.0 }, 140.0, 3, 2.5),
+        (MAP_TOWN, Position { x: 180.0, y: 120.0 }, 130.0, 3, 2.0),
+        (MAP_TOWN, Position { x: 260.0, y: -70.0 }, 140.0, 3, 2.5),
+        (
+            MAP_DUNGEON_1,
+            Position { x: -120.0, y: 80.0 },
+            110.0,
+            4,
+            1.8,
+        ),
     ];
-    for (position, radius, max_count, cooldown_secs) in configs {
+    for (map_id, position, radius, max_count, cooldown_secs) in configs {
         commands.spawn((
+            MapId(map_id.to_string()),
             position,
             Spawner {
                 spawn_type: SpawnType::Enemy,
@@ -150,4 +198,26 @@ pub fn setup_world_map(mut commands: Commands, network: Option<ResMut<network::S
             },
         ));
     }
+
+    // Two-way portals between Town and Dungeon1.
+    commands.spawn((
+        MapId(MAP_TOWN.to_string()),
+        Position { x: 420.0, y: 0.0 },
+        Portal {
+            target_map: MAP_DUNGEON_1.to_string(),
+            target_x: -360.0,
+            target_y: 0.0,
+            trigger_radius: 28.0,
+        },
+    ));
+    commands.spawn((
+        MapId(MAP_DUNGEON_1.to_string()),
+        Position { x: -420.0, y: 0.0 },
+        Portal {
+            target_map: MAP_TOWN.to_string(),
+            target_x: -300.0,
+            target_y: 0.0,
+            trigger_radius: 28.0,
+        },
+    ));
 }

@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use shared::{Position, SpawnType, Spawner};
+use shared::{MapId, Position, SpawnType, Spawner};
 
 use crate::{network, systems::ai};
 
@@ -7,9 +7,10 @@ pub fn spawner_system(
     time: Res<Time>,
     mut commands: Commands,
     network: Option<ResMut<network::ServerNetwork>>,
-    mut spawners: Query<(Entity, &Position, &mut Spawner)>,
+    mut spawners: Query<(Entity, &MapId, &Position, &mut Spawner)>,
     existing: Query<(
         Entity,
+        &MapId,
         &network::NetworkEntity,
         &Position,
         &shared::Health,
@@ -20,14 +21,15 @@ pub fn spawner_system(
         return;
     };
 
-    for (_spawner_entity, spawner_position, mut spawner) in &mut spawners {
+    for (_spawner_entity, spawner_map, spawner_position, mut spawner) in &mut spawners {
         spawner.cooldown_remaining = (spawner.cooldown_remaining - time.delta_secs()).max(0.0);
 
         spawner.active_entities.retain(|entity| {
             existing
                 .get(*entity)
-                .map(|(_, network_entity, _, health, _)| {
-                    network_entity.kind == shared::protocol::NetworkEntityKind::Enemy
+                .map(|(_, map_id, network_entity, _, health, _)| {
+                    map_id.0 == spawner_map.0
+                        && network_entity.kind == shared::protocol::NetworkEntityKind::Enemy
                         && health.current > 0
                 })
                 .unwrap_or(false)
@@ -35,7 +37,10 @@ pub fn spawner_system(
 
         let living_count = existing
             .iter()
-            .filter(|(_, _, position, health, _)| {
+            .filter(|(_, map_id, _, position, health, _)| {
+                if map_id.0 != spawner_map.0 {
+                    return false;
+                }
                 if health.current <= 0 {
                     return false;
                 }
@@ -60,6 +65,7 @@ pub fn spawner_system(
             let spawned = ai::spawn_enemy_at(
                 &mut commands,
                 &mut network,
+                spawner_map,
                 random_point(spawner_position, spawner.radius, sequence),
             );
             spawner.active_entities.push(spawned);

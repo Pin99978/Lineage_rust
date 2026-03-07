@@ -14,7 +14,7 @@ pub use components::item::{
 };
 pub use components::movement::{MoveSpeed, PathQueue, Position, TargetPosition};
 pub use components::npc::{Npc, NpcMarker, NpcType};
-pub use components::world::{SpawnType, Spawner};
+pub use components::world::{MapId, Portal, SpawnType, Spawner, MAP_DUNGEON_1, MAP_TOWN};
 
 pub struct MovementComponentsPlugin;
 
@@ -47,6 +47,8 @@ impl Plugin for MovementComponentsPlugin {
             .register_type::<NpcType>()
             .register_type::<Npc>()
             .register_type::<NpcMarker>()
+            .register_type::<MapId>()
+            .register_type::<Portal>()
             .register_type::<SpawnType>()
             .register_type::<Spawner>();
     }

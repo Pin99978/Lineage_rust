@@ -1,12 +1,13 @@
 use bevy::prelude::*;
 use shared::protocol::NetworkEntityKind;
-use shared::{GroundItem, ItemType, LootTable, Position};
+use shared::{GroundItem, ItemType, LootTable, MapId, Position};
 
 use crate::{network, systems};
 
-#[derive(Message, Debug, Clone, Copy)]
+#[derive(Message, Debug, Clone)]
 pub struct ItemSpawnedMessage {
     pub item_id: u64,
+    pub map_id: String,
     pub item_type: ItemType,
     pub amount: u32,
     pub x: f32,
@@ -17,7 +18,12 @@ pub fn item_drop_system(
     mut commands: Commands,
     mut death_events: MessageReader<systems::combat::CombatDeathEvent>,
     network: Option<ResMut<network::ServerNetwork>>,
-    dead_targets: Query<(&network::NetworkEntity, &Position, Option<&LootTable>)>,
+    dead_targets: Query<(
+        &network::NetworkEntity,
+        &MapId,
+        &Position,
+        Option<&LootTable>,
+    )>,
     mut spawned_messages: MessageWriter<ItemSpawnedMessage>,
 ) {
     let Some(mut network) = network else {
@@ -25,9 +31,9 @@ pub fn item_drop_system(
     };
 
     for death in death_events.read() {
-        let Some((_, position, loot_table)) = dead_targets
+        let Some((_, map_id, position, loot_table)) = dead_targets
             .iter()
-            .find(|(entity, _, _)| entity.id == death.target_id)
+            .find(|(entity, _, _, _)| entity.id == death.target_id)
         else {
             continue;
         };
@@ -56,6 +62,7 @@ pub fn item_drop_system(
 
             commands.spawn((
                 network::NetworkEntity { id: item_id, kind },
+                MapId(map_id.0.clone()),
                 GroundItem {
                     item_type: entry.item_type,
                     amount: entry.amount,
@@ -68,6 +75,7 @@ pub fn item_drop_system(
 
             spawned_messages.write(ItemSpawnedMessage {
                 item_id,
+                map_id: map_id.0.clone(),
                 item_type: entry.item_type,
                 amount: entry.amount,
                 x: item_x,

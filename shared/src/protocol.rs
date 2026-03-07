@@ -82,6 +82,7 @@ pub enum ServerMessage {
     LoginResponse(LoginResponse),
     AssignedPlayer { player_id: u64 },
     EntityState(EntityState),
+    MapChangeEvent(MapChangeEvent),
     DamageEvent(DamageEvent),
     DeathEvent(DeathEvent),
     ItemSpawnEvent(ItemSpawnEvent),
@@ -110,15 +111,23 @@ pub enum NetworkEntityKind {
     LootHealthPotion,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntityState {
     pub entity_id: u64,
     pub kind: NetworkEntityKind,
+    pub map_id: String,
     pub x: f32,
     pub y: f32,
     pub health_current: i32,
     pub health_max: i32,
     pub alive: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MapChangeEvent {
+    pub map_id: String,
+    pub x: f32,
+    pub y: f32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

@@ -4,7 +4,11 @@ use shared::{
     Position, TargetPosition,
 };
 
-use crate::{map_data::CollisionGrid, network, systems::combat, systems::movement};
+use crate::{
+    map_data::MapManager,
+    network,
+    systems::{combat, movement},
+};
 
 #[derive(Component)]
 pub struct EnemyAi;
@@ -25,6 +29,7 @@ impl Default for EnemyPathRepathTimer {
 pub fn spawn_enemy_at(
     commands: &mut Commands,
     network: &mut ResMut<network::ServerNetwork>,
+    map_id: &shared::MapId,
     position: Vec2,
 ) -> Entity {
     let enemy_id = network.allocate_entity_id();
@@ -34,6 +39,7 @@ pub fn spawn_enemy_at(
             id: enemy_id,
             kind: shared::protocol::NetworkEntityKind::Enemy,
         },
+        shared::MapId(map_id.0.clone()),
         Position {
             x: position.x,
             y: position.y,
@@ -64,10 +70,19 @@ pub fn spawn_enemy_at(
 }
 
 pub fn ai_aggro_system(
-    mut enemies: Query<(&Position, &AggroRange, &Health, &mut AiState), With<EnemyAi>>,
-    players: Query<(Entity, &Position, &Health), With<network::PlayerCharacter>>,
+    mut enemies: Query<
+        (
+            &Position,
+            &shared::MapId,
+            &AggroRange,
+            &Health,
+            &mut AiState,
+        ),
+        With<EnemyAi>,
+    >,
+    players: Query<(Entity, &Position, &shared::MapId, &Health), With<network::PlayerCharacter>>,
 ) {
-    for (enemy_position, aggro_range, enemy_health, mut ai_state) in &mut enemies {
+    for (enemy_position, enemy_map, aggro_range, enemy_health, mut ai_state) in &mut enemies {
         if enemy_health.current <= 0 {
             *ai_state = AiState::Idle;
             continue;
@@ -77,7 +92,10 @@ pub fn ai_aggro_system(
         }
 
         let mut nearest: Option<(Entity, f32)> = None;
-        for (player_entity, player_position, player_health) in &players {
+        for (player_entity, player_position, player_map, player_health) in &players {
+            if player_map.0 != enemy_map.0 {
+                continue;
+            }
             if player_health.current <= 0 {
                 continue;
             }
@@ -110,6 +128,7 @@ pub fn ai_chase_and_attack_system(
     mut enemies: Query<
         (
             &Position,
+            &shared::MapId,
             &AggroRange,
             &CombatStats,
             &Health,
@@ -125,6 +144,7 @@ pub fn ai_chase_and_attack_system(
         (
             Entity,
             &Position,
+            &shared::MapId,
             &network::NetworkEntity,
             &mut Health,
             &mut Buffs,
@@ -134,14 +154,15 @@ pub fn ai_chase_and_attack_system(
     mut damage_events: MessageWriter<combat::CombatDamageEvent>,
     mut death_events: MessageWriter<combat::CombatDeathEvent>,
     mut status_updates: MessageWriter<combat::StatusEffectsChangedMessage>,
-    grid: Option<Res<CollisionGrid>>,
+    maps: Option<Res<MapManager>>,
 ) {
-    let Some(grid) = grid else {
+    let Some(maps) = maps else {
         return;
     };
 
     for (
         enemy_position,
+        enemy_map,
         aggro_range,
         combat_stats,
         enemy_health,
@@ -168,6 +189,7 @@ pub fn ai_chase_and_attack_system(
         let Ok((
             _player_entity,
             player_position,
+            player_map,
             player_network,
             mut player_health,
             mut player_buffs,
@@ -179,6 +201,11 @@ pub fn ai_chase_and_attack_system(
         };
 
         if player_health.current <= 0 {
+            *ai_state = AiState::Idle;
+            path_queue.waypoints.clear();
+            continue;
+        }
+        if player_map.0 != enemy_map.0 {
             *ai_state = AiState::Idle;
             path_queue.waypoints.clear();
             continue;
@@ -240,7 +267,12 @@ pub fn ai_chase_and_attack_system(
 
             let from = Vec2::new(enemy_position.x, enemy_position.y);
             let to = Vec2::new(player_position.x, player_position.y);
-            let Some(new_path) = movement::compute_path_world(&grid, from, to) else {
+            let Some(grid) = maps.grids.get(&enemy_map.0) else {
+                *ai_state = AiState::Idle;
+                path_queue.waypoints.clear();
+                continue;
+            };
+            let Some(new_path) = movement::compute_path_world(grid, from, to) else {
                 *ai_state = AiState::Idle;
                 path_queue.waypoints.clear();
                 continue;

@@ -6,8 +6,8 @@ use shared::protocol::{
     StatusEffectUpdate, UseItemIntent,
 };
 use shared::{
-    ActionState, ArmorClass, Buffs, CombatStats, Health, Mana, MoveSpeed, PathQueue, Position,
-    SpellCooldowns, TargetPosition,
+    ActionState, ArmorClass, Buffs, CombatStats, Health, Mana, MapId, MoveSpeed, PathQueue,
+    Position, SpellCooldowns, TargetPosition, MAP_TOWN,
 };
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
@@ -581,40 +581,40 @@ pub fn apply_db_results(
                     &mut combat_stats,
                     &mut armor_class,
                 );
-                let player_entity = commands
-                    .spawn((
-                        PlayerCharacter,
-                        NetworkEntity {
-                            id: player_id,
-                            kind: NetworkEntityKind::Player,
-                        },
-                        Position {
-                            x: data.x,
-                            y: data.y,
-                        },
-                        TargetPosition {
-                            x: data.x,
-                            y: data.y,
-                        },
-                        MoveSpeed { value: 320.0 },
-                        Health {
-                            current: data.health_current,
-                            max: data.health_max.max(1),
-                        },
-                        Mana {
-                            current: data.mana_current,
-                            max: data.mana_max.max(1),
-                        },
-                        armor_class,
-                        combat_stats,
-                        SpellCooldowns::default(),
-                        ActionState::default(),
-                        PathQueue::default(),
-                        Buffs::default(),
-                        data.inventory,
-                        data.equipment.clone(),
-                    ))
-                    .id();
+                let mut player_commands = commands.spawn((
+                    PlayerCharacter,
+                    NetworkEntity {
+                        id: player_id,
+                        kind: NetworkEntityKind::Player,
+                    },
+                    Position {
+                        x: data.x,
+                        y: data.y,
+                    },
+                    TargetPosition {
+                        x: data.x,
+                        y: data.y,
+                    },
+                    MoveSpeed { value: 320.0 },
+                    Health {
+                        current: data.health_current,
+                        max: data.health_max.max(1),
+                    },
+                    Mana {
+                        current: data.mana_current,
+                        max: data.mana_max.max(1),
+                    },
+                    armor_class,
+                    combat_stats,
+                    SpellCooldowns::default(),
+                    ActionState::default(),
+                    PathQueue::default(),
+                    Buffs::default(),
+                    data.inventory,
+                    data.equipment.clone(),
+                ));
+                player_commands.insert(MapId(MAP_TOWN.to_string()));
+                let player_entity = player_commands.id();
 
                 let session = network
                     .sessions
@@ -696,7 +696,8 @@ pub fn apply_db_results(
 
 pub fn broadcast_world_state(
     network: Option<Res<ServerNetwork>>,
-    entities: Query<(&NetworkEntity, &Position, Option<&Health>)>,
+    entities: Query<(&NetworkEntity, &MapId, &Position, Option<&Health>)>,
+    players: Query<&MapId, With<PlayerCharacter>>,
 ) {
     let Some(network) = network else {
         return;
@@ -706,7 +707,16 @@ pub fn broadcast_world_state(
         if !session.logged_in {
             continue;
         }
-        for (network_entity, position, health) in &entities {
+        let Some(player_entity) = session.entity else {
+            continue;
+        };
+        let Ok(player_map) = players.get(player_entity) else {
+            continue;
+        };
+        for (network_entity, entity_map, position, health) in &entities {
+            if entity_map.0 != player_map.0 {
+                continue;
+            }
             let (health_current, health_max, alive) = if let Some(health) = health {
                 (health.current, health.max, health.current > 0)
             } else {
@@ -715,6 +725,7 @@ pub fn broadcast_world_state(
             let message = ServerMessage::EntityState(EntityState {
                 entity_id: network_entity.id,
                 kind: network_entity.kind,
+                map_id: entity_map.0.clone(),
                 x: position.x,
                 y: position.y,
                 health_current,
@@ -771,6 +782,7 @@ pub fn broadcast_combat_events(
 
 pub fn broadcast_item_events(
     network: Option<Res<ServerNetwork>>,
+    players: Query<&MapId, With<PlayerCharacter>>,
     mut spawned_items: MessageReader<drop::ItemSpawnedMessage>,
     mut despawned_items: MessageReader<loot::ItemDespawnedMessage>,
     mut inventory_updates: MessageReader<loot::InventoryUpdateMessage>,
@@ -791,7 +803,13 @@ pub fn broadcast_item_events(
             continue;
         };
         for (&address, session) in &network.sessions {
-            if session.logged_in {
+            let Some(player_entity) = session.entity else {
+                continue;
+            };
+            let Ok(player_map) = players.get(player_entity) else {
+                continue;
+            };
+            if session.logged_in && player_map.0 == spawned.map_id {
                 let _ = network.socket.send_to(&payload, address);
             }
         }
@@ -805,7 +823,13 @@ pub fn broadcast_item_events(
             continue;
         };
         for (&address, session) in &network.sessions {
-            if session.logged_in {
+            let Some(player_entity) = session.entity else {
+                continue;
+            };
+            let Ok(player_map) = players.get(player_entity) else {
+                continue;
+            };
+            if session.logged_in && player_map.0 == despawned.map_id {
                 let _ = network.socket.send_to(&payload, address);
             }
         }
@@ -899,6 +923,31 @@ pub fn broadcast_dialog_events(
         };
         for (&address, session) in &network.sessions {
             if session.logged_in && session.player_id == Some(dialog.player_id) {
+                let _ = network.socket.send_to(&payload, address);
+            }
+        }
+    }
+}
+
+pub fn broadcast_map_change_events(
+    network: Option<Res<ServerNetwork>>,
+    mut map_changed: MessageReader<interaction::MapChangedMessage>,
+) {
+    let Some(network) = network else {
+        return;
+    };
+
+    for changed in map_changed.read() {
+        let message = ServerMessage::MapChangeEvent(shared::protocol::MapChangeEvent {
+            map_id: changed.map_id.clone(),
+            x: changed.x,
+            y: changed.y,
+        });
+        let Ok(payload) = encode_server_message(&message) else {
+            continue;
+        };
+        for (&address, session) in &network.sessions {
+            if session.logged_in && session.player_id == Some(changed.player_id) {
                 let _ = network.socket.send_to(&payload, address);
             }
         }

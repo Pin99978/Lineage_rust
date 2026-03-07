@@ -1,9 +1,9 @@
 use bevy::prelude::*;
 use pathfinding::directed::astar::astar;
-use shared::{MoveSpeed, PathQueue, Position, TargetPosition};
+use shared::{MapId, MoveSpeed, PathQueue, Position, TargetPosition};
 use std::collections::VecDeque;
 
-use crate::map_data::CollisionGrid;
+use crate::map_data::{CollisionGrid, MapManager};
 
 #[derive(Message, Debug, Clone, Copy)]
 pub struct MoveRequest {
@@ -13,16 +13,23 @@ pub struct MoveRequest {
 }
 
 pub fn process_move_requests(
-    grid: Option<Res<CollisionGrid>>,
+    map_manager: Option<Res<MapManager>>,
     mut requests: MessageReader<MoveRequest>,
-    mut movers: Query<(&Position, &mut TargetPosition, &mut PathQueue)>,
+    mut movers: Query<(&Position, &MapId, &mut TargetPosition, &mut PathQueue)>,
 ) {
-    let Some(grid) = grid else {
+    let Some(map_manager) = map_manager else {
         return;
     };
 
     for request in requests.read() {
-        let Ok((position, mut target, mut queue)) = movers.get_mut(request.mover_entity) else {
+        let Ok((position, map_id, mut target, mut queue)) = movers.get_mut(request.mover_entity)
+        else {
+            continue;
+        };
+        let Some(grid) = map_manager.grid_for(map_id) else {
+            queue.waypoints.clear();
+            target.x = position.x;
+            target.y = position.y;
             continue;
         };
 
