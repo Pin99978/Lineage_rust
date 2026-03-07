@@ -34,6 +34,10 @@ pub fn movement_system(
 
 fn resolve_walkable_position(current: Vec2, desired: Vec2) -> Vec2 {
     let clamped = clamp_to_world_bounds(desired);
+    if is_inside_obstacle(current) {
+        return clamped;
+    }
+
     if !is_inside_obstacle(clamped) {
         return clamped;
     }

@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ClientMessage {
     MoveIntent(MoveIntent),
+    AttackIntent(AttackIntent),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -11,16 +12,46 @@ pub struct MoveIntent {
     pub target_y: f32,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct AttackIntent {
+    pub target_id: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerMessage {
-    PlayerState(PlayerState),
+    AssignedPlayer { player_id: u64 },
+    EntityState(EntityState),
+    DamageEvent(DamageEvent),
+    DeathEvent(DeathEvent),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NetworkEntityKind {
+    Player,
+    Dummy,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct PlayerState {
-    pub player_id: u64,
+pub struct EntityState {
+    pub entity_id: u64,
+    pub kind: NetworkEntityKind,
     pub x: f32,
     pub y: f32,
+    pub health_current: i32,
+    pub health_max: i32,
+    pub alive: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct DamageEvent {
+    pub target_id: u64,
+    pub amount: i32,
+    pub remaining_hp: i32,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct DeathEvent {
+    pub target_id: u64,
 }
 
 pub fn encode_client_message(message: &ClientMessage) -> Result<Vec<u8>, bincode::Error> {
