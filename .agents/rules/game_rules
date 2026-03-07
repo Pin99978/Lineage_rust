@@ -36,3 +36,10 @@ We use a single Cargo Workspace with strict boundaries:
   - Any database access (e.g., SQLite/SQLx) MUST run in an async task (e.g., via `IoTaskPool` or `tokio::spawn`), communicating back to the ECS world via channels or events (e.g., `crossbeam_channel`). 
   - **DO NOT block the main ECS thread** for DB reads/writes.
 - **Defensive Programming**: Validate all client inputs. **Never trust the client's payload.** If a client requests to equip an item or login, verify all data rigorously on the server before applying state changes.
+
+## 6. Phase 2+ Roadmap Integration (ARPG Architecture)
+In future Sprints, integrate the following crates following the Claude ARPG Roadmap:
+- **AI & Gameplay**: `big-brain`, `pathfinding`, `leafwing-input-manager`
+- **Engine & Graphics**: `bevy_ecs_tilemap` (for layered isometric setups), `bevy_particle_systems`, `wgpu`
+- **Network & DB**: `lightyear` (for rollback/interpolation), `sqlx` (PostgreSQL), `redis-rs`
+- **Tools & DevOps**: `serde`/`ron` (data-driven config), `ldtk_rust`, `cargo-nextest`, `criterion`, `tracing`

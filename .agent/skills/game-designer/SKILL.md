@@ -17,7 +17,8 @@ Design and balance the core gameplay loops of a "Lineage-like" hardcore MMORPG. 
 1. **Lineage-style Math**: Armor Class (AC) usually goes down (negative is better). Implement classic THAC0 or similar D&D-based hit-chance mechanics.
 2. **ECS Data Driven**: Define stats as Bevy Components (e.g., `Health`, `Mana`, `BaseStats { str, dex, con, int, wis, cha }`).
 3. **Robust Data Validation (Phase 1+)**: Ensure all combat components and formulas handle edge cases safely (e.g., negative damage, missing components, dividing by zero, health overflowing max). Use `.clamp()` extensively and never `unwrap`.
-3. **Determinism**: Ensure all combat math relies on reproducible random number generators (RNG) executed strictly on the server.
+4. **Determinism**: Ensure all combat math relies on reproducible random number generators (RNG) executed strictly on the server.
+5. **Phase 2+ Roadmap (`big-brain`, `pathfinding`)**: Expect to implement Behavior Trees (BT) for advanced enemy AI (Patrol, Chase, Flee) and A* pathfinding for crowded encounters in later sprints.
 
 ## 🚫 DON'Ts
 - Do not make the game too forgiving. Lineage is known for harsh death penalties (EXP loss, item drops).

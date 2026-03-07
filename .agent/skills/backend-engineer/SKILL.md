@@ -23,6 +23,7 @@ Your sole responsibility is to develop the authoritative server inside the `serv
 4. **Authoritative Logic & Async I/O**:
    - Movement inputs from the client are merely "requests". Perform grid collision checks before updating positions.
    - Use `tokio` to spawn async tasks for database operations (e.g., SQLx) so you do not block the main Bevy ECS thread.
+5. **Phase 2+ Roadmap (`lightyear`, `redis`, `sqlx`)**: Prepare for the transition to true authoritative sync with `lightyear` (client-server rollback, interpolation) and more complex database usage with PostgreSQL/`sqlx` in future sprints.
 
 ## 🚫 DON'Ts
 - Do not store visual metadata like "sprite names" or "animation frames" in the server's ECS. The server only cares about Entity states, IDs, and colliders.

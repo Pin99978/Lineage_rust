@@ -26,7 +26,8 @@ Your sole responsibility is to develop the Bevy application inside the `client/`
 5. **Robustness (Phase 1+)**:
    - **UI State Management**: Implement clear UI state transitions (e.g., `AppState::LoginMenu` to `AppState::InGame`). Clear previous UI nodes when transitioning.
    - **Graceful Rendering**: If an asset fails to load, fallback to primitives. Do NOT unwrap/panic in rendering systems.
+6. **Phase 2+ Roadmap (`wgpu`, `bevy_particle_systems`, `bevy_ecs_tilemap`)**: Prepare for dynamic 2D lighting shaders via custom `wgpu` integration, complex spell VFX with particle systems, and multi-layer map rendering in later Sprints.
 
 ## 🚫 DON'Ts
 - Do not use old `EventReader` loops for UI clicks; use Observers.
-- Do not use `bevy_ecs_tilemap` or grid-based maps. Rely on pure transforms and 2.5D depth sorting.
+- Do not use `bevy_ecs_tilemap` or grid-based maps for current MVP. Rely on pure transforms and 2.5D depth sorting.
