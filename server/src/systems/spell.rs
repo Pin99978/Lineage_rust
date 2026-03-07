@@ -47,7 +47,10 @@ pub fn cast_spell_system(
         ),
         With<network::PlayerCharacter>,
     >,
-    mut targets: Query<(Entity, &network::NetworkEntity, &Position, &mut Health)>,
+    mut targets: Query<
+        (Entity, &network::NetworkEntity, &Position, &mut Health),
+        Without<network::PlayerCharacter>,
+    >,
     mut damage_events: MessageWriter<crate::systems::combat::CombatDamageEvent>,
     mut heal_events: MessageWriter<HealEventMessage>,
     mut mana_events: MessageWriter<ManaChangedMessage>,
