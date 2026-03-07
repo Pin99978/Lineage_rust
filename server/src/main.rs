@@ -2,6 +2,7 @@ use bevy::{app::ScheduleRunnerPlugin, prelude::*};
 use shared::MovementComponentsPlugin;
 use std::time::Duration;
 
+mod db;
 mod network;
 mod systems;
 
@@ -22,12 +23,18 @@ fn main() {
         .add_message::<systems::loot::InventoryUpdateMessage>()
         .add_systems(
             Startup,
-            (network::setup_network, systems::ai::spawn_enemies).chain(),
+            (
+                db::setup_db,
+                network::setup_network,
+                systems::ai::spawn_enemies,
+            )
+                .chain(),
         )
         .add_systems(
             Update,
             (
                 network::receive_client_messages,
+                network::apply_db_results,
                 systems::ai::ai_aggro_system,
                 systems::ai::ai_chase_and_attack_system,
                 systems::movement::movement_system,
@@ -38,6 +45,7 @@ fn main() {
                 network::broadcast_world_state,
                 network::broadcast_combat_events,
                 network::broadcast_item_events,
+                db::periodic_save_players,
             )
                 .chain(),
         )

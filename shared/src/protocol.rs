@@ -4,9 +4,15 @@ use crate::ItemType;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ClientMessage {
+    LoginRequest(LoginRequest),
     MoveIntent(MoveIntent),
     AttackIntent(AttackIntent),
     LootIntent(LootIntent),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoginRequest {
+    pub username: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -27,6 +33,7 @@ pub struct LootIntent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerMessage {
+    LoginResponse(LoginResponse),
     AssignedPlayer { player_id: u64 },
     EntityState(EntityState),
     DamageEvent(DamageEvent),
@@ -34,6 +41,12 @@ pub enum ServerMessage {
     ItemSpawnEvent(ItemSpawnEvent),
     ItemDespawnEvent(ItemDespawnEvent),
     InventoryUpdate(InventoryUpdate),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoginResponse {
+    pub success: bool,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

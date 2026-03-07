@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use shared::protocol::{
     decode_server_message, encode_client_message, AttackIntent, ClientMessage, EntityState,
-    LootIntent, NetworkEntityKind, ServerMessage,
+    LoginRequest, LootIntent, NetworkEntityKind, ServerMessage,
 };
 use shared::{Health, Position};
 use std::collections::HashMap;
@@ -62,6 +62,10 @@ pub fn send_move_intent(network: &ClientNetwork, intent: shared::protocol::MoveI
     send_to_server(network, &ClientMessage::MoveIntent(intent));
 }
 
+pub fn send_login_request(network: &ClientNetwork, request: LoginRequest) {
+    send_to_server(network, &ClientMessage::LoginRequest(request));
+}
+
 pub fn send_attack_intent(network: &ClientNetwork, intent: AttackIntent) {
     send_to_server(network, &ClientMessage::AttackIntent(intent));
 }
@@ -81,6 +85,9 @@ fn send_to_server(network: &ClientNetwork, message: &ClientMessage) {
 pub fn receive_server_state(
     mut commands: Commands,
     network: Option<Res<ClientNetwork>>,
+    app_state: Option<Res<State<systems::ui::AppState>>>,
+    mut next_state: Option<ResMut<NextState<systems::ui::AppState>>>,
+    mut login_name: Option<ResMut<systems::ui::LoginName>>,
     local_player: Option<ResMut<LocalPlayer>>,
     entity_map: Option<ResMut<NetworkEntityMap>>,
     mut state_queries: ParamSet<(
@@ -104,6 +111,9 @@ pub fn receive_server_state(
     let Some(network) = network else {
         return;
     };
+    let Some(app_state) = app_state else {
+        return;
+    };
     let Some(mut local_player) = local_player else {
         return;
     };
@@ -121,6 +131,16 @@ pub fn receive_server_state(
         };
 
         match message {
+            ServerMessage::LoginResponse(response) => {
+                if response.success {
+                    if let Some(next_state) = next_state.as_deref_mut() {
+                        next_state.set(systems::ui::AppState::InGame);
+                    }
+                } else if let Some(login_name) = login_name.as_deref_mut() {
+                    login_name.submitted = false;
+                    warn!("login failed: {}", response.message);
+                }
+            }
             ServerMessage::AssignedPlayer { player_id } => {
                 local_player.id = Some(player_id);
                 let mut player_query = state_queries.p0();
@@ -133,6 +153,9 @@ pub fn receive_server_state(
                 entity_map.entity_by_id.insert(player_id, player_entity);
             }
             ServerMessage::EntityState(state) => {
+                if *app_state.get() == systems::ui::AppState::LoginMenu {
+                    continue;
+                }
                 apply_entity_state(
                     &mut commands,
                     &mut local_player,
