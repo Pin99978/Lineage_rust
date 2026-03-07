@@ -1,0 +1,9 @@
+[workspace]
+members = ["client", "server", "shared"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+
+[workspace.dependencies]
+bevy = "0.18"

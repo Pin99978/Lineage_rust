@@ -1,0 +1,45 @@
+# Global Development Rules: Rust Lineage-like MMORPG
+
+## 0. MVP Phase (Whiteboxing) STRICT CONSTRAINT
+- **PHASE 1 ART ALLOWED**: Whitebox-only rendering is lifted from Phase 1 onward. Client-side `asset_server.load()` and `client/assets/` textures are allowed.
+- **SERVER STAYS HEADLESS**: Art assets must never be required by `server/`.
+- **FOCUS ON LOGIC + FEEDBACK**: Keep server authority first, and treat visuals as client feedback.
+
+
+## 1. Tech Stack & Versions
+- **Engine**: Bevy `0.18` ONLY. You MUST NOT use deprecated APIs from Bevy 0.14 or older.
+- **Language**: Rust (Edition 2021).
+- **Networking**: Define clear protocol boundaries. Server is Authoritative.
+
+## 2. Workspace Architecture
+We use a single Cargo Workspace with strict boundaries:
+- `client/`: Bevy App with rendering, UI, audio. (NO authority).
+- `server/`: Bevy Headless App, physics, combat math, database I/O.
+- `shared/`: Shared ECS Components, Enums, and Network Message definitions.
+
+## 3. ECS Principles (Bevy 0.18 Standards)
+- **Required Components**: Favor the `#[require(Component)]` macro (introduced in 0.15) over massive legacy `Bundle` structs to keep the Spawn API clean.
+- **Observers & Messages**: Understand the 0.16+ event split. Use `Message` for buffered, frame-delayed events (like network packets). Use `Event` and `Observer` (`Trigger`) for immediate, reactive logic (like taking damage or UI clicks).
+- Keep Systems small, focused, and flat. Use `Commands` for structural changes.
+
+## 4. Quality & Formatting
+- All Rust code must pass `cargo fmt`.
+- All code must pass `cargo clippy --workspace -- -D warnings`.
+- Never leave `unwrap()` or `panic!()` in the `server/` code; use proper error handling (e.g., `Result`, `anyhow`).
+
+## 5. Robustness & SOLID Principles (Phase 1+)
+- **Single Responsibility Principle (SRP)**: Keep systems extremely focused. A system that handles "Movement" should not also handle "Damage Validation". Build small, composable systems.
+- **Error Handling**: 
+  - Never use `unwrap()` or `expect()` in production systems. 
+  - Use `Result` and log errors with `bevy::log::error!(...)` or `warn!(...)` if an operation fails, rather than panicking the entire server.
+- **Async I/O Boundaries**: 
+  - Any database access (e.g., SQLite/SQLx) MUST run in an async task (e.g., via `IoTaskPool` or `tokio::spawn`), communicating back to the ECS world via channels or events (e.g., `crossbeam_channel`). 
+  - **DO NOT block the main ECS thread** for DB reads/writes.
+- **Defensive Programming**: Validate all client inputs. **Never trust the client's payload.** If a client requests to equip an item or login, verify all data rigorously on the server before applying state changes.
+
+## 6. Phase 2+ Roadmap Integration (ARPG Architecture)
+In future Sprints, integrate the following crates following the Claude ARPG Roadmap:
+- **AI & Gameplay**: `big-brain`, `pathfinding`, `leafwing-input-manager`
+- **Engine & Graphics**: `bevy_ecs_tilemap` (for layered isometric setups), `bevy_particle_systems`, `wgpu`
+- **Network & DB**: `lightyear` (for rollback/interpolation), `sqlx` (PostgreSQL), `redis-rs`
+- **Tools & DevOps**: `serde`/`ron` (data-driven config), `ldtk_rust`, `cargo-nextest`, `criterion`, `tracing`
