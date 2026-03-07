@@ -164,6 +164,11 @@ pub fn receive_server_state(
                 let Ok((player_entity, _, _, _)) = player_query.single_mut() else {
                     continue;
                 };
+                if let Some(existing) = entity_map.entity_by_id.get(&player_id).copied() {
+                    if existing != player_entity {
+                        commands.entity(existing).despawn();
+                    }
+                }
                 commands
                     .entity(player_entity)
                     .insert(NetworkEntityVisual { id: player_id });
