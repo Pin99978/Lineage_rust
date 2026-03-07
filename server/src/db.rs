@@ -342,3 +342,56 @@ pub fn periodic_save_players(
         let _ = db_bridge.command_tx.send(DbCommand::SavePlayer { data });
     }
 }
+
+#[allow(clippy::type_complexity)]
+pub fn save_player_progress_on_change(
+    db_bridge: Option<Res<DbBridge>>,
+    network: Option<Res<network::ServerNetwork>>,
+    players: Query<
+        (
+            &shared::Position,
+            &shared::Health,
+            &shared::Mana,
+            &Inventory,
+            &EquipmentMap,
+        ),
+        Or<(
+            Changed<shared::Position>,
+            Changed<shared::Health>,
+            Changed<shared::Mana>,
+            Changed<Inventory>,
+            Changed<EquipmentMap>,
+        )>,
+    >,
+) {
+    let Some(db_bridge) = db_bridge else {
+        return;
+    };
+    let Some(network) = network else {
+        return;
+    };
+
+    for session in network.sessions.values() {
+        let (Some(username), Some(entity), true) =
+            (session.username.as_ref(), session.entity, session.logged_in)
+        else {
+            continue;
+        };
+        let Ok((position, health, mana, inventory, equipment)) = players.get(entity) else {
+            continue;
+        };
+        let _ = db_bridge.command_tx.send(DbCommand::SavePlayer {
+            data: PersistedPlayer {
+                username: username.clone(),
+                x: position.x,
+                y: position.y,
+                health_current: health.current,
+                health_max: health.max,
+                mana_current: mana.current,
+                mana_max: mana.max,
+                inventory: inventory.clone(),
+                equipment: equipment.clone(),
+            },
+        });
+    }
+}

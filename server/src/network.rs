@@ -10,6 +10,7 @@ use shared::{
 };
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
+use std::time::Instant;
 
 use crate::{
     db,
@@ -18,6 +19,7 @@ use crate::{
 
 const SERVER_BIND_ADDR: &str = "127.0.0.1:5000";
 const MAX_PACKET_SIZE: usize = 1024;
+const SESSION_TIMEOUT_SECS: f32 = 15.0;
 
 #[derive(Component, Debug, Clone, Copy)]
 pub struct NetworkEntity {
@@ -35,6 +37,7 @@ pub struct SessionState {
     pub player_id: Option<u64>,
     pub logged_in: bool,
     pub login_pending: bool,
+    pub last_seen: Instant,
 }
 
 impl SessionState {
@@ -45,6 +48,7 @@ impl SessionState {
             player_id: None,
             logged_in: false,
             login_pending: false,
+            last_seen: Instant::now(),
         }
     }
 }
@@ -84,6 +88,13 @@ pub fn receive_client_messages(
     mut commands: Commands,
     network: Option<ResMut<ServerNetwork>>,
     db_bridge: Option<Res<db::DbBridge>>,
+    player_snapshot: Query<(
+        &Position,
+        &Health,
+        &Mana,
+        &shared::Inventory,
+        &shared::EquipmentMap,
+    )>,
     mut attack_requests: MessageWriter<combat::AttackRequest>,
     mut loot_requests: MessageWriter<loot::LootRequest>,
     mut cast_spell_requests: MessageWriter<spell::CastSpellRequest>,
@@ -108,23 +119,59 @@ pub fn receive_client_messages(
         let Ok(message) = decode_client_message(&buffer[..size]) else {
             continue;
         };
-
-        let session = network
+        network
             .sessions
             .entry(address)
-            .or_insert_with(SessionState::new);
+            .or_insert_with(SessionState::new)
+            .last_seen = Instant::now();
 
         match message {
             ClientMessage::LoginRequest(LoginRequest { username }) => {
+                let requested = username.trim().to_string();
+                if let Some(existing) = network.sessions.get(&address).cloned() {
+                    if existing.logged_in
+                        && existing.username.as_deref() != Some(requested.as_str())
+                    {
+                        if let (Some(username), Some(entity)) =
+                            (existing.username.clone(), existing.entity)
+                        {
+                            if let Ok((position, health, mana, inventory, equipment)) =
+                                player_snapshot.get(entity)
+                            {
+                                let _ = db_bridge.command_tx.send(db::DbCommand::SavePlayer {
+                                    data: db::PersistedPlayer {
+                                        username,
+                                        x: position.x,
+                                        y: position.y,
+                                        health_current: health.current,
+                                        health_max: health.max,
+                                        mana_current: mana.current,
+                                        mana_max: mana.max,
+                                        inventory: inventory.clone(),
+                                        equipment: equipment.clone(),
+                                    },
+                                });
+                            }
+                        }
+                        if let Some(entity) = existing.entity {
+                            commands.entity(entity).despawn();
+                        }
+                        network.sessions.remove(&address);
+                    }
+                }
                 handle_login_request(
+                    &mut network,
                     &socket_clone,
                     &db_bridge.command_tx,
                     address,
-                    session,
-                    username,
+                    requested,
                 );
             }
             ClientMessage::MoveIntent(intent) => {
+                let session = network
+                    .sessions
+                    .entry(address)
+                    .or_insert_with(SessionState::new);
                 if !session.logged_in {
                     continue;
                 }
@@ -136,6 +183,10 @@ pub fn receive_client_messages(
                 }
             }
             ClientMessage::AttackIntent(AttackIntent { target_id }) => {
+                let session = network
+                    .sessions
+                    .entry(address)
+                    .or_insert_with(SessionState::new);
                 if !session.logged_in {
                     continue;
                 }
@@ -147,6 +198,10 @@ pub fn receive_client_messages(
                 }
             }
             ClientMessage::LootIntent(LootIntent { item_id }) => {
+                let session = network
+                    .sessions
+                    .entry(address)
+                    .or_insert_with(SessionState::new);
                 if !session.logged_in {
                     continue;
                 }
@@ -158,6 +213,10 @@ pub fn receive_client_messages(
                 }
             }
             ClientMessage::CastSpellIntent(intent) => {
+                let session = network
+                    .sessions
+                    .entry(address)
+                    .or_insert_with(SessionState::new);
                 if !session.logged_in {
                     continue;
                 }
@@ -170,6 +229,10 @@ pub fn receive_client_messages(
                 }
             }
             ClientMessage::EquipIntent(intent) => {
+                let session = network
+                    .sessions
+                    .entry(address)
+                    .or_insert_with(SessionState::new);
                 if !session.logged_in {
                     continue;
                 }
@@ -181,6 +244,10 @@ pub fn receive_client_messages(
                 }
             }
             ClientMessage::UnequipIntent(intent) => {
+                let session = network
+                    .sessions
+                    .entry(address)
+                    .or_insert_with(SessionState::new);
                 if !session.logged_in {
                     continue;
                 }
@@ -196,10 +263,10 @@ pub fn receive_client_messages(
 }
 
 fn handle_login_request(
+    network: &mut ServerNetwork,
     socket: &UdpSocket,
     command_tx: &crossbeam_channel::Sender<db::DbCommand>,
     address: SocketAddr,
-    session: &mut SessionState,
     username: String,
 ) {
     let username = username.trim().to_string();
@@ -214,13 +281,60 @@ fn handle_login_request(
         return;
     }
 
+    // UDP has no disconnect event. If the same username reconnects from a new
+    // source port/address, resume the existing session instead of spawning a
+    // duplicate player entity.
+    if let Some((old_addr, old_session)) = network
+        .sessions
+        .iter()
+        .find(|(session_addr, session)| {
+            **session_addr != address
+                && session.logged_in
+                && session.username.as_deref() == Some(username.as_str())
+        })
+        .map(|(session_addr, session)| (*session_addr, session.clone()))
+    {
+        network.sessions.remove(&old_addr);
+        let mut resumed = old_session.clone();
+        resumed.last_seen = Instant::now();
+        network.sessions.insert(address, resumed.clone());
+
+        let response = ServerMessage::LoginResponse(LoginResponse {
+            success: true,
+            message: format!("welcome back {}", username),
+        });
+        if let Ok(payload) = encode_server_message(&response) {
+            let _ = socket.send_to(&payload, address);
+        }
+
+        if let Some(player_id) = resumed.player_id {
+            let assigned = ServerMessage::AssignedPlayer { player_id };
+            if let Ok(payload) = encode_server_message(&assigned) {
+                let _ = socket.send_to(&payload, address);
+            }
+        }
+        return;
+    }
+
+    let session = network
+        .sessions
+        .entry(address)
+        .or_insert_with(SessionState::new);
+
     if session.logged_in {
+        session.last_seen = Instant::now();
         let message = ServerMessage::LoginResponse(LoginResponse {
             success: true,
             message: "already logged in".to_string(),
         });
         if let Ok(payload) = encode_server_message(&message) {
             let _ = socket.send_to(&payload, address);
+        }
+        if let Some(player_id) = session.player_id {
+            let assigned = ServerMessage::AssignedPlayer { player_id };
+            if let Ok(payload) = encode_server_message(&assigned) {
+                let _ = socket.send_to(&payload, address);
+            }
         }
         return;
     }
@@ -244,6 +358,60 @@ fn handle_login_request(
         });
         if let Ok(payload) = encode_server_message(&message) {
             let _ = socket.send_to(&payload, address);
+        }
+    }
+}
+
+pub fn cleanup_stale_sessions(
+    mut commands: Commands,
+    network: Option<ResMut<ServerNetwork>>,
+    db_bridge: Option<Res<db::DbBridge>>,
+    players: Query<(
+        &Position,
+        &Health,
+        &Mana,
+        &shared::Inventory,
+        &shared::EquipmentMap,
+    )>,
+) {
+    let Some(mut network) = network else {
+        return;
+    };
+
+    let now = Instant::now();
+    let stale_addresses: Vec<SocketAddr> = network
+        .sessions
+        .iter()
+        .filter_map(|(address, session)| {
+            let idle = now.duration_since(session.last_seen).as_secs_f32();
+            (idle > SESSION_TIMEOUT_SECS).then_some(*address)
+        })
+        .collect();
+
+    for address in stale_addresses {
+        if let Some(session) = network.sessions.remove(&address) {
+            if let (Some(username), Some(entity), Some(db_bridge)) =
+                (session.username.clone(), session.entity, db_bridge.as_ref())
+            {
+                if let Ok((position, health, mana, inventory, equipment)) = players.get(entity) {
+                    let _ = db_bridge.command_tx.send(db::DbCommand::SavePlayer {
+                        data: db::PersistedPlayer {
+                            username,
+                            x: position.x,
+                            y: position.y,
+                            health_current: health.current,
+                            health_max: health.max,
+                            mana_current: mana.current,
+                            mana_max: mana.max,
+                            inventory: inventory.clone(),
+                            equipment: equipment.clone(),
+                        },
+                    });
+                }
+            }
+            if let Some(entity) = session.entity {
+                commands.entity(entity).despawn();
+            }
         }
     }
 }

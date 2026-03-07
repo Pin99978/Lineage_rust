@@ -322,6 +322,10 @@ fn apply_entity_state(
             }
             return;
         }
+        warn!(
+            "entity map mismatch: id {} mapped to {:?} but query lookup failed; respawning visual",
+            state.entity_id, existing_entity
+        );
     }
 
     let mut entity_commands = commands.spawn((

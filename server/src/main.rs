@@ -40,6 +40,7 @@ fn main() {
             Update,
             (
                 network::receive_client_messages,
+                network::cleanup_stale_sessions,
                 network::apply_db_results,
                 systems::ai::ai_aggro_system,
                 systems::ai::ai_chase_and_attack_system,
@@ -61,5 +62,6 @@ fn main() {
             )
                 .chain(),
         )
+        .add_systems(Update, db::save_player_progress_on_change)
         .run();
 }
