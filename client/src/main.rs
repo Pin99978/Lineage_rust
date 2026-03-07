@@ -23,6 +23,7 @@ fn main() {
         })
         .insert_resource(systems::ui::HudState::default())
         .insert_resource(systems::ui::DialogState::default())
+        .insert_resource(systems::ui::chat::ChatUiState::default())
         .add_message::<systems::combat_render::DamagePopupEvent>()
         .add_message::<systems::combat_render::DeathVisualEvent>()
         .add_message::<systems::animation::PlayAttackAnimation>()
@@ -51,10 +52,20 @@ fn main() {
             (
                 network::receive_server_state,
                 systems::ui::login_submit_system.run_if(in_state(systems::ui::AppState::LoginMenu)),
+                systems::ui::chat::chat_focus_and_send_system
+                    .run_if(in_state(systems::ui::AppState::InGame)),
+                systems::ui::chat::chat_text_input_system
+                    .run_if(in_state(systems::ui::AppState::InGame)),
                 systems::interaction::capture_click_intent
                     .run_if(in_state(systems::ui::AppState::InGame)),
                 systems::input::capture_movement_intent
                     .run_if(in_state(systems::ui::AppState::InGame)),
+            )
+                .chain(),
+        )
+        .add_systems(
+            Update,
+            (
                 systems::animation::attach_animation_components,
                 systems::animation::apply_character_atlas_when_ready,
                 systems::animation::trigger_attack_animation,
@@ -66,6 +77,7 @@ fn main() {
                 systems::ui::update_player_mana_hud,
                 systems::ui::update_equipment_text_hud,
                 systems::ui::update_dialog_hud,
+                systems::ui::chat::update_chat_ui_system,
             )
                 .chain(),
         )

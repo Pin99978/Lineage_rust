@@ -10,6 +10,7 @@ pub fn capture_click_intent(
     window_query: Query<&Window>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     network: Option<Res<network::ClientNetwork>>,
+    chat_state: Option<Res<crate::systems::ui::chat::ChatUiState>>,
     mut attack_animation: MessageWriter<animation::PlayAttackAnimation>,
     lootables: Query<(&Transform, &network::NetworkEntityVisual), With<network::Lootable>>,
     npcs: Query<(&Transform, &network::NetworkEntityVisual), With<network::NpcInteractable>>,
@@ -19,6 +20,13 @@ pub fn capture_click_intent(
     >,
 ) {
     if !mouse_buttons.just_pressed(MouseButton::Left) {
+        return;
+    }
+    if chat_state
+        .as_ref()
+        .map(|state| state.focused)
+        .unwrap_or(false)
+    {
         return;
     }
     let Some(network) = network else {

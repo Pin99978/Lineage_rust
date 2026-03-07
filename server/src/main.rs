@@ -30,6 +30,8 @@ fn main() {
         .add_message::<systems::equipment::EquipmentChangedMessage>()
         .add_message::<systems::interaction::InteractRequest>()
         .add_message::<systems::interaction::DialogMessage>()
+        .add_message::<systems::chat::ChatRequest>()
+        .add_message::<systems::chat::ChatDelivery>()
         .add_systems(
             Startup,
             (
@@ -53,6 +55,13 @@ fn main() {
                 systems::spell::tick_spell_cooldowns,
                 systems::spell::cast_spell_system,
                 systems::interaction::interaction_system,
+                systems::chat::chat_system,
+            )
+                .chain(),
+        )
+        .add_systems(
+            Update,
+            (
                 systems::drop::item_drop_system,
                 systems::loot::loot_system,
                 systems::equipment::equip_system,
@@ -70,6 +79,7 @@ fn main() {
                 network::broadcast_spell_events,
                 network::broadcast_equipment_events,
                 network::broadcast_dialog_events,
+                network::broadcast_chat_events,
                 db::periodic_save_players,
             )
                 .chain(),

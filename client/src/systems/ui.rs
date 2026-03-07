@@ -4,6 +4,8 @@ use shared::{EquipmentMap, Health};
 
 use crate::{network, Player};
 
+pub mod chat;
+
 #[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AppState {
     #[default]
@@ -65,6 +67,9 @@ pub struct EquipmentTextUi;
 
 #[derive(Component)]
 pub struct DialogTextUi;
+
+#[derive(Component)]
+pub struct DialogPanelUi;
 
 pub fn setup_login_menu(mut commands: Commands, login_name: Option<Res<LoginName>>) {
     let username = login_name
@@ -228,6 +233,7 @@ pub fn setup_ui(mut commands: Commands) {
     commands.entity(root).add_child(hint_text);
 
     commands.spawn((
+        DialogPanelUi,
         Node {
             position_type: PositionType::Absolute,
             top: Val::Px(24.0),
@@ -251,6 +257,8 @@ pub fn setup_ui(mut commands: Commands) {
             TextColor(Color::srgb(0.95, 0.95, 0.9))
         )],
     ));
+
+    chat::setup_chat_ui(&mut commands);
 }
 
 pub fn update_player_health_hud(
@@ -316,7 +324,7 @@ pub fn update_equipment_text_hud(
 pub fn update_dialog_hud(
     time: Res<Time>,
     dialog_state: Option<ResMut<DialogState>>,
-    mut nodes: Query<(&mut Visibility, &Children), Without<DialogTextUi>>,
+    mut nodes: Query<(&mut Visibility, &Children), With<DialogPanelUi>>,
     mut texts: Query<&mut Text, With<DialogTextUi>>,
 ) {
     let Some(mut dialog_state) = dialog_state else {

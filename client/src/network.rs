@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use shared::protocol::{
-    decode_server_message, encode_client_message, AttackIntent, CastSpellIntent, ClientMessage,
-    EntityState, EquipIntent, InteractIntent, LoginRequest, LootIntent, NetworkEntityKind,
-    ServerMessage, UnequipIntent,
+    decode_server_message, encode_client_message, AttackIntent, CastSpellIntent, ChatIntent,
+    ClientMessage, EntityState, EquipIntent, InteractIntent, LoginRequest, LootIntent,
+    NetworkEntityKind, ServerMessage, UnequipIntent,
 };
 use shared::{EquipmentSlot, Health, ItemType, Position, SpellType};
 use std::collections::HashMap;
@@ -94,6 +94,10 @@ pub fn send_interact_intent(network: &ClientNetwork, intent: InteractIntent) {
     send_to_server(network, &ClientMessage::InteractIntent(intent));
 }
 
+pub fn send_chat_intent(network: &ClientNetwork, intent: ChatIntent) {
+    send_to_server(network, &ClientMessage::ChatIntent(intent));
+}
+
 fn send_to_server(network: &ClientNetwork, message: &ClientMessage) {
     let Ok(payload) = encode_client_message(message) else {
         return;
@@ -131,6 +135,7 @@ pub fn receive_server_state(
     mut death_feedback: MessageWriter<systems::combat_render::DeathVisualEvent>,
     mut attack_animation: MessageWriter<systems::animation::PlayAttackAnimation>,
     dialog_state: Option<ResMut<systems::ui::DialogState>>,
+    chat_state: Option<ResMut<systems::ui::chat::ChatUiState>>,
 ) {
     let Some(network) = network else {
         return;
@@ -148,6 +153,9 @@ pub fn receive_server_state(
         return;
     };
     let Some(mut dialog_state) = dialog_state else {
+        return;
+    };
+    let Some(mut chat_state) = chat_state else {
         return;
     };
 
@@ -262,6 +270,17 @@ pub fn receive_server_state(
                     dialog_state.visible = true;
                     dialog_state.timer.reset();
                 }
+            }
+            ServerMessage::ChatEvent(event) => {
+                let prefix = match event.channel {
+                    shared::protocol::ChatChannel::Say => "[Say]",
+                    shared::protocol::ChatChannel::Shout => "[Shout]",
+                    shared::protocol::ChatChannel::Whisper => "[Whisper]",
+                };
+                systems::ui::chat::push_history_line(
+                    &mut chat_state,
+                    format!("{} {}: {}", prefix, event.sender, event.message),
+                );
             }
         }
     }

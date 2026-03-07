@@ -7,6 +7,7 @@ use crate::{network, systems::animation, Player};
 pub fn capture_movement_intent(
     keyboard: Res<ButtonInput<KeyCode>>,
     network: Option<Res<network::ClientNetwork>>,
+    chat_state: Option<Res<crate::systems::ui::chat::ChatUiState>>,
     player_query: Query<&Transform, With<Player>>,
     mut attack_animation: MessageWriter<animation::PlayAttackAnimation>,
     attackables: Query<
@@ -17,6 +18,13 @@ pub fn capture_movement_intent(
     let Some(network) = network else {
         return;
     };
+    if chat_state
+        .as_ref()
+        .map(|state| state.focused)
+        .unwrap_or(false)
+    {
+        return;
+    }
 
     if keyboard.just_pressed(KeyCode::Digit1) {
         if let Ok(player_transform) = player_query.single() {

@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod chat;
 pub mod combat;
 pub mod drop;
 pub mod equipment;

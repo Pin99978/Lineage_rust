@@ -12,6 +12,7 @@ pub enum ClientMessage {
     EquipIntent(EquipIntent),
     UnequipIntent(UnequipIntent),
     InteractIntent(InteractIntent),
+    ChatIntent(ChatIntent),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +57,20 @@ pub struct InteractIntent {
     pub target_id: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ChatChannel {
+    Say,
+    Shout,
+    Whisper,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatIntent {
+    pub channel: ChatChannel,
+    pub target: Option<String>,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerMessage {
     LoginResponse(LoginResponse),
@@ -70,6 +85,7 @@ pub enum ServerMessage {
     EquipmentUpdate(EquipmentUpdate),
     HealEvent(HealEvent),
     DialogEvent(DialogEvent),
+    ChatEvent(ChatEvent),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -155,6 +171,13 @@ pub struct HealEvent {
 pub struct DialogEvent {
     pub player_id: u64,
     pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatEvent {
+    pub sender: String,
+    pub channel: ChatChannel,
+    pub message: String,
 }
 
 pub fn encode_client_message(message: &ClientMessage) -> Result<Vec<u8>, bincode::Error> {

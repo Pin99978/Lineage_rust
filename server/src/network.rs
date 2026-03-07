@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use shared::protocol::{
-    decode_client_message, encode_server_message, AttackIntent, ClientMessage, DamageEvent,
-    EntityState, EquipmentUpdate, InventoryUpdate, ItemDespawnEvent, ItemSpawnEvent, LoginRequest,
-    LoginResponse, LootIntent, ManaUpdate, NetworkEntityKind, ServerMessage,
+    decode_client_message, encode_server_message, AttackIntent, ChatIntent, ClientMessage,
+    DamageEvent, EntityState, EquipmentUpdate, InventoryUpdate, ItemDespawnEvent, ItemSpawnEvent,
+    LoginRequest, LoginResponse, LootIntent, ManaUpdate, NetworkEntityKind, ServerMessage,
 };
 use shared::{
     ActionState, ArmorClass, CombatStats, Health, Mana, MoveSpeed, Position, SpellCooldowns,
@@ -14,7 +14,7 @@ use std::time::Instant;
 
 use crate::{
     db,
-    systems::{combat, drop, equipment, interaction, loot, spell},
+    systems::{chat, combat, drop, equipment, interaction, loot, spell},
 };
 
 const SERVER_BIND_ADDR: &str = "127.0.0.1:5000";
@@ -101,6 +101,7 @@ pub fn receive_client_messages(
     mut equip_requests: MessageWriter<equipment::EquipRequest>,
     mut unequip_requests: MessageWriter<equipment::UnequipRequest>,
     mut interact_requests: MessageWriter<interaction::InteractRequest>,
+    mut chat_requests: MessageWriter<chat::ChatRequest>,
 ) {
     let Some(mut network) = network else {
         return;
@@ -271,6 +272,27 @@ pub fn receive_client_messages(
                     interact_requests.write(interaction::InteractRequest {
                         player_entity,
                         target_id: intent.target_id,
+                    });
+                }
+            }
+            ClientMessage::ChatIntent(ChatIntent {
+                channel,
+                target,
+                message,
+            }) => {
+                let session = network
+                    .sessions
+                    .entry(address)
+                    .or_insert_with(SessionState::new);
+                if !session.logged_in {
+                    continue;
+                }
+                if let Some(player_entity) = session.entity {
+                    chat_requests.write(chat::ChatRequest {
+                        player_entity,
+                        channel,
+                        target,
+                        message,
                     });
                 }
             }
@@ -765,6 +787,27 @@ pub fn broadcast_dialog_events(
         };
         for (&address, session) in &network.sessions {
             if session.logged_in && session.player_id == Some(dialog.player_id) {
+                let _ = network.socket.send_to(&payload, address);
+            }
+        }
+    }
+}
+
+pub fn broadcast_chat_events(
+    network: Option<Res<ServerNetwork>>,
+    mut chat_events: MessageReader<chat::ChatDelivery>,
+) {
+    let Some(network) = network else {
+        return;
+    };
+
+    for chat in chat_events.read() {
+        let message = ServerMessage::ChatEvent(chat.event.clone());
+        let Ok(payload) = encode_server_message(&message) else {
+            continue;
+        };
+        for (&address, session) in &network.sessions {
+            if session.logged_in && session.player_id == Some(chat.recipient_player_id) {
                 let _ = network.socket.send_to(&payload, address);
             }
         }
