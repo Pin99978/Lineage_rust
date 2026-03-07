@@ -111,3 +111,27 @@ impl Default for SpellCooldowns {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Reflect, Default)]
+pub enum EffectType {
+    #[default]
+    Poison,
+    Regen,
+    SpeedUp,
+    AttackUp,
+    DefenseDown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Reflect)]
+pub struct StatusEffect {
+    pub effect_type: EffectType,
+    pub duration_remaining: f32,
+    pub tick_timer: f32,
+    pub strength: f32,
+}
+
+#[derive(Component, Default, Debug, Clone, Reflect)]
+#[reflect(Component, Default)]
+pub struct Buffs {
+    pub effects: Vec<StatusEffect>,
+}

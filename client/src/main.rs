@@ -85,6 +85,7 @@ fn main() {
                 systems::ui::update_player_health_hud,
                 systems::ui::update_player_mana_hud,
                 systems::ui::update_equipment_text_hud,
+                systems::ui::update_status_effects_hud,
                 systems::ui::update_dialog_hud,
                 systems::ui::chat::update_chat_ui_system,
                 systems::ui::inventory::apply_inventory_visibility_system,

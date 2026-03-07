@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use shared::protocol::LoginRequest;
-use shared::{EquipmentMap, Health};
+use shared::{EquipmentMap, Health, StatusEffect};
 
 use crate::{network, Player};
 
@@ -26,6 +26,7 @@ pub struct HudState {
     pub mana_current: i32,
     pub mana_max: i32,
     pub equipment: EquipmentMap,
+    pub status_effects: Vec<StatusEffect>,
 }
 
 impl Default for HudState {
@@ -34,6 +35,7 @@ impl Default for HudState {
             mana_current: 60,
             mana_max: 60,
             equipment: EquipmentMap::default(),
+            status_effects: Vec::new(),
         }
     }
 }
@@ -66,6 +68,9 @@ pub struct PlayerManaBarUi;
 
 #[derive(Component)]
 pub struct EquipmentTextUi;
+
+#[derive(Component)]
+pub struct StatusEffectsTextUi;
 
 #[derive(Component)]
 pub struct DialogTextUi;
@@ -221,9 +226,18 @@ pub fn setup_ui(mut commands: Commands) {
 
     let hint_text = commands
         .spawn((
-            Text::new("1 Fireball | 2 Heal | E/R Equip | Q/W Unequip"),
+            Text::new("1 Potion | 2 Fireball | 3 Heal | E/R Equip | Q/W Unequip"),
             TextFont::from_font_size(14.0),
             TextColor(Color::srgb(0.75, 0.8, 0.9)),
+        ))
+        .id();
+
+    let status_text = commands
+        .spawn((
+            StatusEffectsTextUi,
+            Text::new("Status: None"),
+            TextFont::from_font_size(14.0),
+            TextColor(Color::srgb(0.84, 0.9, 0.78)),
         ))
         .id();
 
@@ -233,6 +247,7 @@ pub fn setup_ui(mut commands: Commands) {
     commands.entity(mana_bg).add_child(mana_fill);
     commands.entity(root).add_child(equipment_text);
     commands.entity(root).add_child(hint_text);
+    commands.entity(root).add_child(status_text);
 
     commands.spawn((
         DialogPanelUi,
@@ -322,6 +337,32 @@ pub fn update_equipment_text_hud(
         "Equip: Weapon={:?} Armor={:?}",
         hud_state.equipment.weapon, hud_state.equipment.armor
     ));
+}
+
+pub fn update_status_effects_hud(
+    hud_state: Option<Res<HudState>>,
+    mut text_query: Query<&mut Text, With<StatusEffectsTextUi>>,
+) {
+    let Some(hud_state) = hud_state else {
+        return;
+    };
+    if !hud_state.is_changed() {
+        return;
+    }
+    let Ok(mut text) = text_query.single_mut() else {
+        return;
+    };
+
+    if hud_state.status_effects.is_empty() {
+        *text = Text::new("Status: None");
+        return;
+    }
+
+    let mut labels = Vec::new();
+    for effect in &hud_state.status_effects {
+        labels.push(format!("{:?}", effect.effect_type));
+    }
+    *text = Text::new(format!("Status: {}", labels.join(", ")));
 }
 
 #[allow(clippy::type_complexity)]

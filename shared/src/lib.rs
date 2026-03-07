@@ -5,7 +5,8 @@ pub mod protocol;
 
 pub use components::ai::{AggroRange, AiState, AttackCooldown};
 pub use components::combat::{
-    spell_def, ActionState, ArmorClass, CombatStats, Health, Mana, SpellCooldowns, SpellType,
+    spell_def, ActionState, ArmorClass, Buffs, CombatStats, EffectType, Health, Mana,
+    SpellCooldowns, SpellType, StatusEffect,
 };
 pub use components::item::{
     item_modifier, item_slot, EquipmentMap, EquipmentSlot, GroundItem, Inventory, ItemType,
@@ -32,6 +33,9 @@ impl Plugin for MovementComponentsPlugin {
             .register_type::<ActionState>()
             .register_type::<SpellType>()
             .register_type::<SpellCooldowns>()
+            .register_type::<EffectType>()
+            .register_type::<StatusEffect>()
+            .register_type::<Buffs>()
             .register_type::<GroundItem>()
             .register_type::<Inventory>()
             .register_type::<ItemType>()

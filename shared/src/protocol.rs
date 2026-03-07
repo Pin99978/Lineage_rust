@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{EquipmentMap, EquipmentSlot, ItemType, SpellType};
+use crate::{EquipmentMap, EquipmentSlot, ItemType, SpellType, StatusEffect};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ClientMessage {
@@ -13,6 +13,7 @@ pub enum ClientMessage {
     UnequipIntent(UnequipIntent),
     InteractIntent(InteractIntent),
     ChatIntent(ChatIntent),
+    UseItemIntent(UseItemIntent),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +72,11 @@ pub struct ChatIntent {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct UseItemIntent {
+    pub item_type: ItemType,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerMessage {
     LoginResponse(LoginResponse),
@@ -86,6 +92,7 @@ pub enum ServerMessage {
     HealEvent(HealEvent),
     DialogEvent(DialogEvent),
     ChatEvent(ChatEvent),
+    StatusEffectUpdate(StatusEffectUpdate),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -178,6 +185,12 @@ pub struct ChatEvent {
     pub sender: String,
     pub channel: ChatChannel,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatusEffectUpdate {
+    pub player_id: u64,
+    pub effects: Vec<StatusEffect>,
 }
 
 pub fn encode_client_message(message: &ClientMessage) -> Result<Vec<u8>, bincode::Error> {

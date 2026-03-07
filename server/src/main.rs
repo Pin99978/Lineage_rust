@@ -33,6 +33,8 @@ fn main() {
         .add_message::<systems::chat::ChatRequest>()
         .add_message::<systems::chat::ChatDelivery>()
         .add_message::<systems::movement::MoveRequest>()
+        .add_message::<systems::item::UseItemRequest>()
+        .add_message::<systems::combat::StatusEffectsChangedMessage>()
         .add_systems(
             Startup,
             (
@@ -54,8 +56,10 @@ fn main() {
                 systems::ai::ai_chase_and_attack_system,
                 systems::movement::movement_system,
                 systems::combat::combat_system,
+                systems::combat::update_status_effects_system,
                 systems::spell::tick_spell_cooldowns,
                 systems::spell::cast_spell_system,
+                systems::item::use_item_system,
                 systems::interaction::interaction_system,
                 systems::chat::chat_system,
             )
@@ -82,6 +86,7 @@ fn main() {
                 network::broadcast_equipment_events,
                 network::broadcast_dialog_events,
                 network::broadcast_chat_events,
+                network::broadcast_status_effect_events,
                 db::periodic_save_players,
             )
                 .chain(),

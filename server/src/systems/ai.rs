@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use shared::{
-    AggroRange, AiState, AttackCooldown, CombatStats, Health, LootTable, PathQueue, Position,
-    TargetPosition,
+    AggroRange, AiState, AttackCooldown, Buffs, CombatStats, Health, LootTable, PathQueue,
+    Position, TargetPosition,
 };
 
 use crate::{map_data::CollisionGrid, network, systems::combat, systems::movement};
@@ -46,6 +46,7 @@ pub fn spawn_enemy_at(
             current: 120,
             max: 120,
         },
+        Buffs::default(),
         LootTable::default(),
         CombatStats {
             attack_power: 12,
@@ -121,11 +122,18 @@ pub fn ai_chase_and_attack_system(
         (With<EnemyAi>, Without<network::PlayerCharacter>),
     >,
     mut players: Query<
-        (Entity, &Position, &network::NetworkEntity, &mut Health),
+        (
+            Entity,
+            &Position,
+            &network::NetworkEntity,
+            &mut Health,
+            &mut Buffs,
+        ),
         (With<network::PlayerCharacter>, Without<EnemyAi>),
     >,
     mut damage_events: MessageWriter<combat::CombatDamageEvent>,
     mut death_events: MessageWriter<combat::CombatDeathEvent>,
+    mut status_updates: MessageWriter<combat::StatusEffectsChangedMessage>,
     grid: Option<Res<CollisionGrid>>,
 ) {
     let Some(grid) = grid else {
@@ -157,8 +165,13 @@ pub fn ai_chase_and_attack_system(
             AiState::Idle => continue,
         };
 
-        let Ok((_player_entity, player_position, player_network, mut player_health)) =
-            players.get_mut(target_entity)
+        let Ok((
+            _player_entity,
+            player_position,
+            player_network,
+            mut player_health,
+            mut player_buffs,
+        )) = players.get_mut(target_entity)
         else {
             *ai_state = AiState::Idle;
             path_queue.waypoints.clear();
@@ -201,6 +214,14 @@ pub fn ai_chase_and_attack_system(
                 amount: damage,
                 remaining_hp: player_health.current,
             });
+
+            let poisoned = combat::add_or_refresh_poison(&mut player_buffs, 4.0, 3.0);
+            if poisoned {
+                status_updates.write(combat::StatusEffectsChangedMessage {
+                    player_id: player_network.id,
+                    effects: player_buffs.effects.clone(),
+                });
+            }
 
             if player_health.current == 0 {
                 death_events.write(combat::CombatDeathEvent {

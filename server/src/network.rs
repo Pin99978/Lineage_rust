@@ -3,9 +3,10 @@ use shared::protocol::{
     decode_client_message, encode_server_message, AttackIntent, ChatIntent, ClientMessage,
     DamageEvent, EntityState, EquipmentUpdate, InventoryUpdate, ItemDespawnEvent, ItemSpawnEvent,
     LoginRequest, LoginResponse, LootIntent, ManaUpdate, NetworkEntityKind, ServerMessage,
+    StatusEffectUpdate, UseItemIntent,
 };
 use shared::{
-    ActionState, ArmorClass, CombatStats, Health, Mana, MoveSpeed, PathQueue, Position,
+    ActionState, ArmorClass, Buffs, CombatStats, Health, Mana, MoveSpeed, PathQueue, Position,
     SpellCooldowns, TargetPosition,
 };
 use std::collections::HashMap;
@@ -14,7 +15,7 @@ use std::time::Instant;
 
 use crate::{
     db,
-    systems::{chat, combat, drop, equipment, interaction, loot, movement, spell},
+    systems::{chat, combat, drop, equipment, interaction, item, loot, movement, spell},
 };
 
 const SERVER_BIND_ADDR: &str = "127.0.0.1:5000";
@@ -94,6 +95,7 @@ pub fn receive_client_messages(
         &Mana,
         &shared::Inventory,
         &shared::EquipmentMap,
+        &Buffs,
     )>,
     mut attack_requests: MessageWriter<combat::AttackRequest>,
     mut loot_requests: MessageWriter<loot::LootRequest>,
@@ -103,6 +105,7 @@ pub fn receive_client_messages(
     mut interact_requests: MessageWriter<interaction::InteractRequest>,
     mut chat_requests: MessageWriter<chat::ChatRequest>,
     mut move_requests: MessageWriter<movement::MoveRequest>,
+    mut use_item_requests: MessageWriter<item::UseItemRequest>,
 ) {
     let Some(mut network) = network else {
         return;
@@ -138,7 +141,7 @@ pub fn receive_client_messages(
                         if let (Some(username), Some(entity)) =
                             (existing.username.clone(), existing.entity)
                         {
-                            if let Ok((position, health, mana, inventory, equipment)) =
+                            if let Ok((position, health, mana, inventory, equipment, _buffs)) =
                                 player_snapshot.get(entity)
                             {
                                 let _ = db_bridge.command_tx.send(db::DbCommand::SavePlayer {
@@ -299,6 +302,21 @@ pub fn receive_client_messages(
                     });
                 }
             }
+            ClientMessage::UseItemIntent(UseItemIntent { item_type }) => {
+                let session = network
+                    .sessions
+                    .entry(address)
+                    .or_insert_with(SessionState::new);
+                if !session.logged_in {
+                    continue;
+                }
+                if let Some(player_entity) = session.entity {
+                    use_item_requests.write(item::UseItemRequest {
+                        player_entity,
+                        item_type,
+                    });
+                }
+            }
         }
     }
 }
@@ -313,6 +331,7 @@ fn handle_login_request(
         &Mana,
         &shared::Inventory,
         &shared::EquipmentMap,
+        &Buffs,
     )>,
     address: SocketAddr,
     username: String,
@@ -427,9 +446,10 @@ fn send_player_snapshot(
         &Mana,
         &shared::Inventory,
         &shared::EquipmentMap,
+        &Buffs,
     )>,
 ) {
-    let Ok((_, _, mana, inventory, equipment)) = player_snapshot.get(player_entity) else {
+    let Ok((_, _, mana, inventory, equipment, buffs)) = player_snapshot.get(player_entity) else {
         return;
     };
 
@@ -459,6 +479,14 @@ fn send_player_snapshot(
         if let Ok(payload) = encode_server_message(&inventory_message) {
             let _ = socket.send_to(&payload, address);
         }
+    }
+
+    let status_message = ServerMessage::StatusEffectUpdate(StatusEffectUpdate {
+        player_id,
+        effects: buffs.effects.clone(),
+    });
+    if let Ok(payload) = encode_server_message(&status_message) {
+        let _ = socket.send_to(&payload, address);
     }
 }
 
@@ -582,6 +610,7 @@ pub fn apply_db_results(
                         SpellCooldowns::default(),
                         ActionState::default(),
                         PathQueue::default(),
+                        Buffs::default(),
                         data.inventory,
                         data.equipment.clone(),
                     ))
@@ -636,6 +665,14 @@ pub fn apply_db_results(
                     if let Ok(payload) = encode_server_message(&inventory_message) {
                         let _ = network.socket.send_to(&payload, address);
                     }
+                }
+
+                let status_message = ServerMessage::StatusEffectUpdate(StatusEffectUpdate {
+                    player_id,
+                    effects: Vec::new(),
+                });
+                if let Ok(payload) = encode_server_message(&status_message) {
+                    let _ = network.socket.send_to(&payload, address);
                 }
             }
             db::DbResult::LoginFailed { address, message } => {
@@ -883,6 +920,30 @@ pub fn broadcast_chat_events(
         };
         for (&address, session) in &network.sessions {
             if session.logged_in && session.player_id == Some(chat.recipient_player_id) {
+                let _ = network.socket.send_to(&payload, address);
+            }
+        }
+    }
+}
+
+pub fn broadcast_status_effect_events(
+    network: Option<Res<ServerNetwork>>,
+    mut status_events: MessageReader<combat::StatusEffectsChangedMessage>,
+) {
+    let Some(network) = network else {
+        return;
+    };
+
+    for status in status_events.read() {
+        let message = ServerMessage::StatusEffectUpdate(StatusEffectUpdate {
+            player_id: status.player_id,
+            effects: status.effects.clone(),
+        });
+        let Ok(payload) = encode_server_message(&message) else {
+            continue;
+        };
+        for (&address, session) in &network.sessions {
+            if session.logged_in && session.player_id == Some(status.player_id) {
                 let _ = network.socket.send_to(&payload, address);
             }
         }

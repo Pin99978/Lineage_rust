@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use shared::protocol::UseItemIntent;
 use shared::{EquipmentSlot, Health, ItemType, SpellType};
 
 use crate::{network, systems::animation, Player};
@@ -35,6 +36,15 @@ pub fn capture_movement_intent(
     }
 
     if keyboard.just_pressed(KeyCode::Digit1) {
+        network::send_use_item_intent(
+            &network,
+            UseItemIntent {
+                item_type: ItemType::HealthPotion,
+            },
+        );
+    }
+
+    if keyboard.just_pressed(KeyCode::Digit2) {
         if let Ok(player_transform) = player_query.single() {
             let player_position = player_transform.translation.truncate();
             let target = attackables
@@ -55,7 +65,7 @@ pub fn capture_movement_intent(
         }
     }
 
-    if keyboard.just_pressed(KeyCode::Digit2) {
+    if keyboard.just_pressed(KeyCode::Digit3) {
         network::cast_spell_by_hotkey(&network, SpellType::Heal, None);
         attack_animation.write(animation::PlayAttackAnimation {
             target_id: None,

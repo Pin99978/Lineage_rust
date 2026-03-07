@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use shared::protocol::{
     decode_server_message, encode_client_message, AttackIntent, CastSpellIntent, ChatIntent,
     ClientMessage, EntityState, EquipIntent, InteractIntent, LoginRequest, LootIntent,
-    NetworkEntityKind, ServerMessage, UnequipIntent,
+    NetworkEntityKind, ServerMessage, UnequipIntent, UseItemIntent,
 };
 use shared::{EquipmentSlot, Health, ItemType, Position, SpellType};
 use std::collections::HashMap;
@@ -96,6 +96,10 @@ pub fn send_interact_intent(network: &ClientNetwork, intent: InteractIntent) {
 
 pub fn send_chat_intent(network: &ClientNetwork, intent: ChatIntent) {
     send_to_server(network, &ClientMessage::ChatIntent(intent));
+}
+
+pub fn send_use_item_intent(network: &ClientNetwork, intent: UseItemIntent) {
+    send_to_server(network, &ClientMessage::UseItemIntent(intent));
 }
 
 fn send_to_server(network: &ClientNetwork, message: &ClientMessage) {
@@ -299,6 +303,11 @@ pub fn receive_server_state(
                     &mut chat_state,
                     format!("{} {}: {}", prefix, event.sender, event.message),
                 );
+            }
+            ServerMessage::StatusEffectUpdate(event) => {
+                if local_player.id == Some(event.player_id) {
+                    hud_state.status_effects = event.effects;
+                }
             }
         }
     }

@@ -4,6 +4,7 @@ pub mod combat;
 pub mod drop;
 pub mod equipment;
 pub mod interaction;
+pub mod item;
 pub mod loot;
 pub mod movement;
 pub mod spawner;
