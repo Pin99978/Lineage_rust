@@ -21,6 +21,12 @@ fn main() {
         .add_message::<systems::loot::LootRequest>()
         .add_message::<systems::loot::ItemDespawnedMessage>()
         .add_message::<systems::loot::InventoryUpdateMessage>()
+        .add_message::<systems::spell::CastSpellRequest>()
+        .add_message::<systems::spell::ManaChangedMessage>()
+        .add_message::<systems::spell::HealEventMessage>()
+        .add_message::<systems::equipment::EquipRequest>()
+        .add_message::<systems::equipment::UnequipRequest>()
+        .add_message::<systems::equipment::EquipmentChangedMessage>()
         .add_systems(
             Startup,
             (
@@ -39,12 +45,18 @@ fn main() {
                 systems::ai::ai_chase_and_attack_system,
                 systems::movement::movement_system,
                 systems::combat::combat_system,
+                systems::spell::tick_spell_cooldowns,
+                systems::spell::cast_spell_system,
                 systems::drop::item_drop_system,
                 systems::loot::loot_system,
+                systems::equipment::equip_system,
+                systems::equipment::unequip_system,
                 systems::combat::log_player_death_system,
                 network::broadcast_world_state,
                 network::broadcast_combat_events,
                 network::broadcast_item_events,
+                network::broadcast_spell_events,
+                network::broadcast_equipment_events,
                 db::periodic_save_players,
             )
                 .chain(),

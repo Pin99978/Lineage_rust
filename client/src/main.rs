@@ -20,6 +20,7 @@ fn main() {
             username,
             submitted: false,
         })
+        .insert_resource(systems::ui::HudState::default())
         .add_message::<systems::combat_render::DamagePopupEvent>()
         .add_message::<systems::combat_render::DeathVisualEvent>()
         .add_systems(Startup, (setup_camera, network::setup_network))
@@ -44,6 +45,8 @@ fn main() {
                     .run_if(in_state(systems::ui::AppState::InGame)),
                 systems::combat_render::attach_world_health_bars,
                 systems::ui::update_player_health_hud,
+                systems::ui::update_player_mana_hud,
+                systems::ui::update_equipment_text_hud,
                 systems::combat_render::update_world_health_bars,
                 systems::combat_render::apply_damage_feedback,
                 systems::combat_render::apply_death_feedback,

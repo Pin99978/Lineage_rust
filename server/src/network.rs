@@ -1,16 +1,19 @@
 use bevy::prelude::*;
 use shared::protocol::{
     decode_client_message, encode_server_message, AttackIntent, ClientMessage, DamageEvent,
-    EntityState, InventoryUpdate, ItemDespawnEvent, ItemSpawnEvent, LoginRequest, LoginResponse,
-    LootIntent, NetworkEntityKind, ServerMessage,
+    EntityState, EquipmentUpdate, InventoryUpdate, ItemDespawnEvent, ItemSpawnEvent, LoginRequest,
+    LoginResponse, LootIntent, ManaUpdate, NetworkEntityKind, ServerMessage,
 };
-use shared::{ActionState, CombatStats, Health, MoveSpeed, Position, TargetPosition};
+use shared::{
+    ActionState, ArmorClass, CombatStats, Health, Mana, MoveSpeed, Position, SpellCooldowns,
+    TargetPosition,
+};
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 
 use crate::{
     db,
-    systems::{combat, drop, loot},
+    systems::{combat, drop, equipment, loot, spell},
 };
 
 const SERVER_BIND_ADDR: &str = "127.0.0.1:5000";
@@ -76,12 +79,16 @@ pub fn setup_network(mut commands: Commands) {
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn receive_client_messages(
     mut commands: Commands,
     network: Option<ResMut<ServerNetwork>>,
     db_bridge: Option<Res<db::DbBridge>>,
     mut attack_requests: MessageWriter<combat::AttackRequest>,
     mut loot_requests: MessageWriter<loot::LootRequest>,
+    mut cast_spell_requests: MessageWriter<spell::CastSpellRequest>,
+    mut equip_requests: MessageWriter<equipment::EquipRequest>,
+    mut unequip_requests: MessageWriter<equipment::UnequipRequest>,
 ) {
     let Some(mut network) = network else {
         return;
@@ -147,6 +154,40 @@ pub fn receive_client_messages(
                     loot_requests.write(loot::LootRequest {
                         looter_entity: player_entity,
                         item_id,
+                    });
+                }
+            }
+            ClientMessage::CastSpellIntent(intent) => {
+                if !session.logged_in {
+                    continue;
+                }
+                if let Some(player_entity) = session.entity {
+                    cast_spell_requests.write(spell::CastSpellRequest {
+                        caster_entity: player_entity,
+                        spell: intent.spell,
+                        target_id: intent.target_id,
+                    });
+                }
+            }
+            ClientMessage::EquipIntent(intent) => {
+                if !session.logged_in {
+                    continue;
+                }
+                if let Some(player_entity) = session.entity {
+                    equip_requests.write(equipment::EquipRequest {
+                        player_entity,
+                        item_type: intent.item_type,
+                    });
+                }
+            }
+            ClientMessage::UnequipIntent(intent) => {
+                if !session.logged_in {
+                    continue;
+                }
+                if let Some(player_entity) = session.entity {
+                    unequip_requests.write(equipment::UnequipRequest {
+                        player_entity,
+                        slot: intent.slot,
                     });
                 }
             }
@@ -232,6 +273,17 @@ pub fn apply_db_results(
                 }
 
                 let player_id = network.allocate_entity_id();
+                let mut combat_stats = CombatStats {
+                    attack_power: 25,
+                    attack_range: 90.0,
+                    attack_speed: 1.0,
+                };
+                let mut armor_class = ArmorClass::default();
+                equipment::recalculate_stats_from_equipment(
+                    &data.equipment,
+                    &mut combat_stats,
+                    &mut armor_class,
+                );
                 let player_entity = commands
                     .spawn((
                         PlayerCharacter,
@@ -252,13 +304,16 @@ pub fn apply_db_results(
                             current: data.health_current,
                             max: data.health_max.max(1),
                         },
-                        CombatStats {
-                            attack_power: 25,
-                            attack_range: 90.0,
-                            attack_speed: 1.0,
+                        Mana {
+                            current: data.mana_current,
+                            max: data.mana_max.max(1),
                         },
+                        armor_class,
+                        combat_stats,
+                        SpellCooldowns::default(),
                         ActionState::default(),
                         data.inventory,
+                        data.equipment.clone(),
                     ))
                     .id();
 
@@ -282,6 +337,23 @@ pub fn apply_db_results(
 
                 let assigned = ServerMessage::AssignedPlayer { player_id };
                 if let Ok(payload) = encode_server_message(&assigned) {
+                    let _ = network.socket.send_to(&payload, address);
+                }
+
+                let mana_message = ServerMessage::ManaUpdate(ManaUpdate {
+                    player_id,
+                    current: data.mana_current,
+                    max: data.mana_max.max(1),
+                });
+                if let Ok(payload) = encode_server_message(&mana_message) {
+                    let _ = network.socket.send_to(&payload, address);
+                }
+
+                let equipment_message = ServerMessage::EquipmentUpdate(EquipmentUpdate {
+                    player_id,
+                    equipment: data.equipment,
+                });
+                if let Ok(payload) = encode_server_message(&equipment_message) {
                     let _ = network.socket.send_to(&payload, address);
                 }
             }
@@ -433,6 +505,61 @@ pub fn broadcast_item_events(
 
         for (&address, session) in &network.sessions {
             if session.logged_in && session.player_id == Some(inventory.player_id) {
+                let _ = network.socket.send_to(&payload, address);
+            }
+        }
+    }
+}
+
+pub fn broadcast_spell_events(
+    network: Option<Res<ServerNetwork>>,
+    mut mana_events: MessageReader<spell::ManaChangedMessage>,
+    mut heal_events: MessageReader<spell::HealEventMessage>,
+) {
+    let Some(network) = network else {
+        return;
+    };
+
+    for mana in mana_events.read() {
+        let message = ServerMessage::ManaUpdate(spell::to_mana_update(*mana));
+        let Ok(payload) = encode_server_message(&message) else {
+            continue;
+        };
+        for (&address, session) in &network.sessions {
+            if session.logged_in && session.player_id == Some(mana.player_id) {
+                let _ = network.socket.send_to(&payload, address);
+            }
+        }
+    }
+
+    for heal in heal_events.read() {
+        let message = ServerMessage::HealEvent(spell::to_heal_event(*heal));
+        let Ok(payload) = encode_server_message(&message) else {
+            continue;
+        };
+        for (&address, session) in &network.sessions {
+            if session.logged_in {
+                let _ = network.socket.send_to(&payload, address);
+            }
+        }
+    }
+}
+
+pub fn broadcast_equipment_events(
+    network: Option<Res<ServerNetwork>>,
+    mut equipment_events: MessageReader<equipment::EquipmentChangedMessage>,
+) {
+    let Some(network) = network else {
+        return;
+    };
+
+    for changed in equipment_events.read() {
+        let message = ServerMessage::EquipmentUpdate(equipment::to_equipment_update(changed));
+        let Ok(payload) = encode_server_message(&message) else {
+            continue;
+        };
+        for (&address, session) in &network.sessions {
+            if session.logged_in && session.player_id == Some(changed.player_id) {
                 let _ = network.socket.send_to(&payload, address);
             }
         }

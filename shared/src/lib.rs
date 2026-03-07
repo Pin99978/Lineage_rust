@@ -4,8 +4,13 @@ pub mod components;
 pub mod protocol;
 
 pub use components::ai::{AggroRange, AiState, AttackCooldown};
-pub use components::combat::{ActionState, CombatStats, Health};
-pub use components::item::{GroundItem, Inventory, ItemType, LootDropEntry, LootTable};
+pub use components::combat::{
+    spell_def, ActionState, ArmorClass, CombatStats, Health, Mana, SpellCooldowns, SpellType,
+};
+pub use components::item::{
+    item_modifier, item_slot, EquipmentMap, EquipmentSlot, GroundItem, Inventory, ItemType,
+    LootDropEntry, LootTable, StatModifier,
+};
 pub use components::movement::{MoveSpeed, Position, TargetPosition};
 
 pub struct MovementComponentsPlugin;
@@ -19,11 +24,18 @@ impl Plugin for MovementComponentsPlugin {
             .register_type::<AiState>()
             .register_type::<AttackCooldown>()
             .register_type::<Health>()
+            .register_type::<Mana>()
+            .register_type::<ArmorClass>()
             .register_type::<CombatStats>()
             .register_type::<ActionState>()
+            .register_type::<SpellType>()
+            .register_type::<SpellCooldowns>()
             .register_type::<GroundItem>()
             .register_type::<Inventory>()
             .register_type::<ItemType>()
+            .register_type::<EquipmentSlot>()
+            .register_type::<StatModifier>()
+            .register_type::<EquipmentMap>()
             .register_type::<LootDropEntry>()
             .register_type::<LootTable>();
     }

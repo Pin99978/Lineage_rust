@@ -50,6 +50,8 @@ pub fn item_drop_system(
             let kind = match entry.item_type {
                 ItemType::Gold => NetworkEntityKind::LootGold,
                 ItemType::HealthPotion => NetworkEntityKind::LootHealthPotion,
+                ItemType::BronzeSword => NetworkEntityKind::LootGold,
+                ItemType::LeatherArmor => NetworkEntityKind::LootHealthPotion,
             };
 
             commands.spawn((

@@ -1,9 +1,10 @@
 use bevy::prelude::*;
 use shared::protocol::{
-    decode_server_message, encode_client_message, AttackIntent, ClientMessage, EntityState,
-    LoginRequest, LootIntent, NetworkEntityKind, ServerMessage,
+    decode_server_message, encode_client_message, AttackIntent, CastSpellIntent, ClientMessage,
+    EntityState, EquipIntent, LoginRequest, LootIntent, NetworkEntityKind, ServerMessage,
+    UnequipIntent,
 };
-use shared::{Health, Position};
+use shared::{EquipmentSlot, Health, ItemType, Position, SpellType};
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 
@@ -74,6 +75,18 @@ pub fn send_loot_intent(network: &ClientNetwork, intent: LootIntent) {
     send_to_server(network, &ClientMessage::LootIntent(intent));
 }
 
+pub fn send_cast_spell_intent(network: &ClientNetwork, intent: CastSpellIntent) {
+    send_to_server(network, &ClientMessage::CastSpellIntent(intent));
+}
+
+pub fn send_equip_intent(network: &ClientNetwork, intent: EquipIntent) {
+    send_to_server(network, &ClientMessage::EquipIntent(intent));
+}
+
+pub fn send_unequip_intent(network: &ClientNetwork, intent: UnequipIntent) {
+    send_to_server(network, &ClientMessage::UnequipIntent(intent));
+}
+
 fn send_to_server(network: &ClientNetwork, message: &ClientMessage) {
     let Ok(payload) = encode_client_message(message) else {
         return;
@@ -88,6 +101,7 @@ pub fn receive_server_state(
     app_state: Option<Res<State<systems::ui::AppState>>>,
     mut next_state: Option<ResMut<NextState<systems::ui::AppState>>>,
     mut login_name: Option<ResMut<systems::ui::LoginName>>,
+    hud_state: Option<ResMut<systems::ui::HudState>>,
     local_player: Option<ResMut<LocalPlayer>>,
     entity_map: Option<ResMut<NetworkEntityMap>>,
     mut state_queries: ParamSet<(
@@ -115,6 +129,9 @@ pub fn receive_server_state(
         return;
     };
     let Some(mut local_player) = local_player else {
+        return;
+    };
+    let Some(mut hud_state) = hud_state else {
         return;
     };
     let Some(mut entity_map) = entity_map else {
@@ -194,6 +211,28 @@ pub fn receive_server_state(
                 if local_player.id == Some(event.player_id) {
                     info!("picked up {:?}, total {}", event.item_type, event.amount);
                 }
+            }
+            ServerMessage::ManaUpdate(event) => {
+                if local_player.id == Some(event.player_id) {
+                    hud_state.mana_current = event.current;
+                    hud_state.mana_max = event.max;
+                    info!("mana: {}/{}", event.current, event.max);
+                }
+            }
+            ServerMessage::EquipmentUpdate(event) => {
+                if local_player.id == Some(event.player_id) {
+                    hud_state.equipment = event.equipment.clone();
+                    info!(
+                        "equipment changed: weapon={:?} armor={:?}",
+                        event.equipment.weapon, event.equipment.armor
+                    );
+                }
+            }
+            ServerMessage::HealEvent(event) => {
+                info!(
+                    "heal event: target {} +{} hp (now {})",
+                    event.target_id, event.amount, event.resulting_hp
+                );
             }
         }
     }
@@ -317,6 +356,8 @@ fn spawn_or_update_item(
     let kind = match item_type {
         shared::ItemType::Gold => NetworkEntityKind::LootGold,
         shared::ItemType::HealthPotion => NetworkEntityKind::LootHealthPotion,
+        shared::ItemType::BronzeSword => NetworkEntityKind::LootGold,
+        shared::ItemType::LeatherArmor => NetworkEntityKind::LootHealthPotion,
     };
 
     if let Some(entity) = entity_map.entity_by_id.get(&item_id).copied() {
@@ -347,6 +388,18 @@ fn spawn_or_update_item(
         ))
         .id();
     entity_map.entity_by_id.insert(item_id, entity);
+}
+
+pub fn cast_spell_by_hotkey(network: &ClientNetwork, spell: SpellType, target_id: Option<u64>) {
+    send_cast_spell_intent(network, CastSpellIntent { spell, target_id });
+}
+
+pub fn equip_item_by_hotkey(network: &ClientNetwork, item_type: ItemType) {
+    send_equip_intent(network, EquipIntent { item_type });
+}
+
+pub fn unequip_slot_by_hotkey(network: &ClientNetwork, slot: EquipmentSlot) {
+    send_unequip_intent(network, UnequipIntent { slot });
 }
 
 fn is_loot_kind(kind: NetworkEntityKind) -> bool {

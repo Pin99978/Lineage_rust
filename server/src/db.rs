@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use rusqlite::{params, Connection};
-use shared::Inventory;
+use shared::{EquipmentMap, Inventory};
 use std::collections::HashMap;
 use std::thread;
 use std::time::Duration;
@@ -17,7 +17,10 @@ pub struct PersistedPlayer {
     pub y: f32,
     pub health_current: i32,
     pub health_max: i32,
+    pub mana_current: i32,
+    pub mana_max: i32,
     pub inventory: Inventory,
+    pub equipment: EquipmentMap,
 }
 
 #[derive(Debug)]
@@ -90,9 +93,39 @@ fn db_worker_loop(command_rx: Receiver<DbCommand>, result_tx: Sender<DbResult>) 
             y REAL NOT NULL,
             health_current INTEGER NOT NULL,
             health_max INTEGER NOT NULL,
-            inventory_json TEXT NOT NULL
+            mana_current INTEGER NOT NULL DEFAULT 60,
+            mana_max INTEGER NOT NULL DEFAULT 60,
+            inventory_json TEXT NOT NULL,
+            equipment_json TEXT NOT NULL DEFAULT '{"weapon":null,"armor":null}'
         );
         "#,
+    ) {
+        error!("database migration failed: {}", error);
+        return;
+    }
+    if let Err(error) = ensure_column(
+        &conn,
+        "users",
+        "mana_current",
+        "ALTER TABLE users ADD COLUMN mana_current INTEGER NOT NULL DEFAULT 60",
+    ) {
+        error!("database migration failed: {}", error);
+        return;
+    }
+    if let Err(error) = ensure_column(
+        &conn,
+        "users",
+        "mana_max",
+        "ALTER TABLE users ADD COLUMN mana_max INTEGER NOT NULL DEFAULT 60",
+    ) {
+        error!("database migration failed: {}", error);
+        return;
+    }
+    if let Err(error) = ensure_column(
+        &conn,
+        "users",
+        "equipment_json",
+        "ALTER TABLE users ADD COLUMN equipment_json TEXT NOT NULL DEFAULT '{\"weapon\":null,\"armor\":null}'",
     ) {
         error!("database migration failed: {}", error);
         return;
@@ -115,7 +148,10 @@ fn db_worker_loop(command_rx: Receiver<DbCommand>, result_tx: Sender<DbResult>) 
                     y: 0.0,
                     health_current: 100,
                     health_max: 100,
+                    mana_current: 60,
+                    mana_max: 60,
                     inventory: Inventory::default(),
+                    equipment: EquipmentMap::default(),
                 };
                 if let Err(error) = save_player(&conn, &new_player) {
                     let _ = result_tx.send(DbResult::LoginFailed {
@@ -143,10 +179,35 @@ fn db_worker_loop(command_rx: Receiver<DbCommand>, result_tx: Sender<DbResult>) 
     }
 }
 
+fn ensure_column(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    alter_sql: &str,
+) -> Result<(), String> {
+    let mut statement = conn
+        .prepare(&format!("PRAGMA table_info({})", table))
+        .map_err(|error| format!("prepare table info failed: {}", error))?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| format!("query table info failed: {}", error))?;
+    for row in rows {
+        let Ok(name) = row else {
+            continue;
+        };
+        if name == column {
+            return Ok(());
+        }
+    }
+    conn.execute(alter_sql, [])
+        .map_err(|error| format!("add column {} failed: {}", column, error))?;
+    Ok(())
+}
+
 fn load_player(conn: &Connection, username: &str) -> Option<PersistedPlayer> {
     let mut statement = conn
         .prepare(
-            "SELECT x, y, health_current, health_max, inventory_json FROM users WHERE username = ?1",
+            "SELECT x, y, health_current, health_max, mana_current, mana_max, inventory_json, equipment_json FROM users WHERE username = ?1",
         )
         .ok()?;
     let row = statement
@@ -156,38 +217,60 @@ fn load_player(conn: &Connection, username: &str) -> Option<PersistedPlayer> {
                 row.get::<_, f32>(1)?,
                 row.get::<_, i32>(2)?,
                 row.get::<_, i32>(3)?,
-                row.get::<_, String>(4)?,
+                row.get::<_, i32>(4)?,
+                row.get::<_, i32>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
             ))
         })
         .ok()?;
 
     let inventory_items: HashMap<shared::ItemType, u32> =
-        serde_json::from_str(&row.4).unwrap_or_default();
+        serde_json::from_str(&row.6).unwrap_or_default();
+    let equipment = serde_json::from_str(&row.7).unwrap_or_default();
     Some(PersistedPlayer {
         username: username.to_string(),
         x: row.0,
         y: row.1,
         health_current: row.2,
         health_max: row.3,
+        mana_current: row.4,
+        mana_max: row.5,
         inventory: Inventory {
             items: inventory_items,
         },
+        equipment,
     })
 }
 
 fn save_player(conn: &Connection, data: &PersistedPlayer) -> Result<(), String> {
     let inventory_json = serde_json::to_string(&data.inventory.items)
         .map_err(|error| format!("serialize inventory failed: {}", error))?;
+    let equipment_json = serde_json::to_string(&data.equipment)
+        .map_err(|error| format!("serialize equipment failed: {}", error))?;
     conn.execute(
         r#"
-        INSERT INTO users (username, x, y, health_current, health_max, inventory_json)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        INSERT INTO users (
+            username,
+            x,
+            y,
+            health_current,
+            health_max,
+            mana_current,
+            mana_max,
+            inventory_json,
+            equipment_json
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
         ON CONFLICT(username) DO UPDATE SET
             x = excluded.x,
             y = excluded.y,
             health_current = excluded.health_current,
             health_max = excluded.health_max,
-            inventory_json = excluded.inventory_json
+            mana_current = excluded.mana_current,
+            mana_max = excluded.mana_max,
+            inventory_json = excluded.inventory_json,
+            equipment_json = excluded.equipment_json
         "#,
         params![
             data.username,
@@ -195,7 +278,10 @@ fn save_player(conn: &Connection, data: &PersistedPlayer) -> Result<(), String> 
             data.y,
             data.health_current,
             data.health_max,
-            inventory_json
+            data.mana_current,
+            data.mana_max,
+            inventory_json,
+            equipment_json
         ],
     )
     .map_err(|error| format!("save player failed: {}", error))?;
@@ -211,7 +297,9 @@ pub fn periodic_save_players(
         &network::NetworkEntity,
         &shared::Position,
         &shared::Health,
+        &shared::Mana,
         &Inventory,
+        &EquipmentMap,
     )>,
 ) {
     let Some(mut save_tick) = save_tick else {
@@ -235,7 +323,9 @@ pub fn periodic_save_players(
         else {
             continue;
         };
-        let Ok((_network_entity, position, health, inventory)) = players.get(entity) else {
+        let Ok((_network_entity, position, health, mana, inventory, equipment)) =
+            players.get(entity)
+        else {
             continue;
         };
         let data = PersistedPlayer {
@@ -244,7 +334,10 @@ pub fn periodic_save_players(
             y: position.y,
             health_current: health.current,
             health_max: health.max,
+            mana_current: mana.current,
+            mana_max: mana.max,
             inventory: inventory.clone(),
+            equipment: equipment.clone(),
         };
         let _ = db_bridge.command_tx.send(DbCommand::SavePlayer { data });
     }

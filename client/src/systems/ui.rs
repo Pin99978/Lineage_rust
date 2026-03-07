@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use shared::protocol::LoginRequest;
-use shared::Health;
+use shared::{EquipmentMap, Health};
 
 use crate::{network, Player};
 
@@ -17,11 +17,34 @@ pub struct LoginName {
     pub submitted: bool,
 }
 
+#[derive(Resource, Debug, Clone)]
+pub struct HudState {
+    pub mana_current: i32,
+    pub mana_max: i32,
+    pub equipment: EquipmentMap,
+}
+
+impl Default for HudState {
+    fn default() -> Self {
+        Self {
+            mana_current: 60,
+            mana_max: 60,
+            equipment: EquipmentMap::default(),
+        }
+    }
+}
+
 #[derive(Component)]
 pub struct LoginMenuRoot;
 
 #[derive(Component)]
 pub struct PlayerHealthBarUi;
+
+#[derive(Component)]
+pub struct PlayerManaBarUi;
+
+#[derive(Component)]
+pub struct EquipmentTextUi;
 
 pub fn setup_login_menu(mut commands: Commands, login_name: Option<Res<LoginName>>) {
     let username = login_name
@@ -102,10 +125,12 @@ pub fn setup_ui(mut commands: Commands) {
                 position_type: PositionType::Absolute,
                 left: Val::Px(20.0),
                 bottom: Val::Px(20.0),
-                width: Val::Px(260.0),
-                height: Val::Px(54.0),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
+                width: Val::Px(340.0),
+                height: Val::Px(130.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::FlexStart,
+                justify_content: JustifyContent::SpaceEvenly,
+                padding: UiRect::all(Val::Px(12.0)),
                 ..Default::default()
             },
             BackgroundColor(Color::srgba(0.05, 0.05, 0.06, 0.85)),
@@ -115,7 +140,7 @@ pub fn setup_ui(mut commands: Commands) {
     let health_bg = commands
         .spawn((
             Node {
-                width: Val::Px(220.0),
+                width: Val::Px(260.0),
                 height: Val::Px(16.0),
                 ..Default::default()
             },
@@ -135,8 +160,52 @@ pub fn setup_ui(mut commands: Commands) {
         ))
         .id();
 
+    let mana_bg = commands
+        .spawn((
+            Node {
+                width: Val::Px(260.0),
+                height: Val::Px(14.0),
+                ..Default::default()
+            },
+            BackgroundColor(Color::srgb(0.02, 0.06, 0.12)),
+        ))
+        .id();
+
+    let mana_fill = commands
+        .spawn((
+            PlayerManaBarUi,
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                ..Default::default()
+            },
+            BackgroundColor(Color::srgb(0.12, 0.45, 0.9)),
+        ))
+        .id();
+
+    let equipment_text = commands
+        .spawn((
+            EquipmentTextUi,
+            Text::new("Equip: Weapon=None Armor=None"),
+            TextFont::from_font_size(16.0),
+            TextColor(Color::srgb(0.9, 0.92, 0.95)),
+        ))
+        .id();
+
+    let hint_text = commands
+        .spawn((
+            Text::new("1 Fireball | 2 Heal | E/R Equip | Q/W Unequip"),
+            TextFont::from_font_size(14.0),
+            TextColor(Color::srgb(0.75, 0.8, 0.9)),
+        ))
+        .id();
+
     commands.entity(root).add_child(health_bg);
     commands.entity(health_bg).add_child(health_fill);
+    commands.entity(root).add_child(mana_bg);
+    commands.entity(mana_bg).add_child(mana_fill);
+    commands.entity(root).add_child(equipment_text);
+    commands.entity(root).add_child(hint_text);
 }
 
 pub fn update_player_health_hud(
@@ -157,4 +226,43 @@ pub fn update_player_health_hud(
     };
 
     bar_node.width = Val::Percent(ratio * 100.0);
+}
+
+pub fn update_player_mana_hud(
+    hud_state: Option<Res<HudState>>,
+    mut bar_query: Query<&mut Node, With<PlayerManaBarUi>>,
+) {
+    let Some(hud_state) = hud_state else {
+        return;
+    };
+    let Ok(mut bar_node) = bar_query.single_mut() else {
+        return;
+    };
+
+    let ratio = if hud_state.mana_max > 0 {
+        (hud_state.mana_current as f32 / hud_state.mana_max as f32).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    bar_node.width = Val::Percent(ratio * 100.0);
+}
+
+pub fn update_equipment_text_hud(
+    hud_state: Option<Res<HudState>>,
+    mut text_query: Query<&mut Text, With<EquipmentTextUi>>,
+) {
+    let Some(hud_state) = hud_state else {
+        return;
+    };
+    if !hud_state.is_changed() {
+        return;
+    }
+    let Ok(mut text) = text_query.single_mut() else {
+        return;
+    };
+
+    *text = Text::new(format!(
+        "Equip: Weapon={:?} Armor={:?}",
+        hud_state.equipment.weapon, hud_state.equipment.armor
+    ));
 }
