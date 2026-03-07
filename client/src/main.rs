@@ -1,6 +1,7 @@
 use bevy::prelude::*;
-use shared::{MoveSpeed, MovementComponentsPlugin, Position, TargetPosition};
+use shared::{MovementComponentsPlugin, Position};
 
+mod network;
 mod systems;
 
 #[derive(Component)]
@@ -10,12 +11,12 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(MovementComponentsPlugin)
-        .add_systems(Startup, setup)
+        .add_systems(Startup, (setup, network::setup_network))
         .add_systems(
             Update,
             (
                 systems::input::capture_movement_intent,
-                systems::movement::movement_system,
+                network::receive_server_state,
                 systems::movement::sync_transform_system,
             ),
         )
@@ -28,8 +29,6 @@ fn setup(mut commands: Commands) {
     commands.spawn((
         Player,
         Position::default(),
-        TargetPosition::default(),
-        MoveSpeed { value: 320.0 },
         Sprite::from_color(Color::srgb(0.1, 0.4, 1.0), Vec2::splat(32.0)),
         Transform::from_xyz(0.0, 0.0, 0.0),
     ));

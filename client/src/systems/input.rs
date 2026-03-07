@@ -1,13 +1,13 @@
 use bevy::prelude::*;
-use shared::TargetPosition;
+use shared::protocol::MoveIntent;
 
-use crate::Player;
+use crate::network;
 
 pub fn capture_movement_intent(
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     window_query: Query<&Window>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
-    mut player_query: Query<&mut TargetPosition, With<Player>>,
+    network: Option<Res<network::ClientNetwork>>,
 ) {
     if !mouse_buttons.just_pressed(MouseButton::Left) {
         return;
@@ -27,8 +27,15 @@ pub fn capture_movement_intent(
         return;
     };
 
-    for mut target_position in &mut player_query {
-        target_position.x = world_position.x;
-        target_position.y = world_position.y;
-    }
+    let Some(network) = network else {
+        return;
+    };
+
+    network::send_move_intent(
+        &network,
+        MoveIntent {
+            target_x: world_position.x,
+            target_y: world_position.y,
+        },
+    );
 }

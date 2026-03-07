@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 pub mod components;
+pub mod protocol;
 
 pub use components::movement::{MoveSpeed, Position, TargetPosition};
 

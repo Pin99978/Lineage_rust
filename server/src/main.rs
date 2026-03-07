@@ -2,6 +2,7 @@ use bevy::{app::ScheduleRunnerPlugin, prelude::*};
 use shared::MovementComponentsPlugin;
 use std::time::Duration;
 
+mod network;
 mod systems;
 
 fn main() {
@@ -12,6 +13,14 @@ fn main() {
             ))),
         )
         .add_plugins(MovementComponentsPlugin)
-        .add_systems(Update, systems::movement::movement_system)
+        .add_systems(Startup, network::setup_network)
+        .add_systems(
+            Update,
+            (
+                network::receive_client_messages,
+                systems::movement::movement_system,
+                network::broadcast_player_state,
+            ),
+        )
         .run();
 }
