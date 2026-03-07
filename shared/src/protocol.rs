@@ -28,7 +28,7 @@ pub enum ServerMessage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NetworkEntityKind {
     Player,
-    Dummy,
+    Enemy,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

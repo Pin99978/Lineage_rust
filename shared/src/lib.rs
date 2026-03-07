@@ -3,6 +3,7 @@ use bevy::prelude::*;
 pub mod components;
 pub mod protocol;
 
+pub use components::ai::{AggroRange, AiState, AttackCooldown};
 pub use components::combat::{ActionState, CombatStats, Health};
 pub use components::movement::{MoveSpeed, Position, TargetPosition};
 
@@ -13,6 +14,9 @@ impl Plugin for MovementComponentsPlugin {
         app.register_type::<Position>()
             .register_type::<TargetPosition>()
             .register_type::<MoveSpeed>()
+            .register_type::<AggroRange>()
+            .register_type::<AiState>()
+            .register_type::<AttackCooldown>()
             .register_type::<Health>()
             .register_type::<CombatStats>()
             .register_type::<ActionState>();

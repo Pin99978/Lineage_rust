@@ -227,7 +227,7 @@ fn apply_entity_state(
         Sprite::from_color(color_for_kind(state.kind), Vec2::splat(32.0)),
         Transform::from_xyz(state.x, state.y, 0.0),
     ));
-    if state.kind == NetworkEntityKind::Dummy {
+    if state.kind == NetworkEntityKind::Enemy {
         entity_commands.insert(Attackable);
     }
     let spawned = entity_commands.id();
@@ -237,6 +237,6 @@ fn apply_entity_state(
 fn color_for_kind(kind: NetworkEntityKind) -> Color {
     match kind {
         NetworkEntityKind::Player => Color::srgb(0.1, 0.6, 1.0),
-        NetworkEntityKind::Dummy => Color::srgb(0.85, 0.25, 0.2),
+        NetworkEntityKind::Enemy => Color::srgb(0.85, 0.25, 0.2),
     }
 }

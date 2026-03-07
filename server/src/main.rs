@@ -18,14 +18,17 @@ fn main() {
         .add_message::<systems::combat::CombatDeathEvent>()
         .add_systems(
             Startup,
-            (network::setup_network, systems::combat::spawn_target_dummy).chain(),
+            (network::setup_network, systems::ai::spawn_enemies).chain(),
         )
         .add_systems(
             Update,
             (
                 network::receive_client_messages,
+                systems::ai::ai_aggro_system,
+                systems::ai::ai_chase_and_attack_system,
                 systems::movement::movement_system,
                 systems::combat::combat_system,
+                systems::combat::log_player_death_system,
                 network::broadcast_world_state,
                 network::broadcast_combat_events,
             )

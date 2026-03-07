@@ -21,29 +21,6 @@ pub struct CombatDeathEvent {
     pub target_id: u64,
 }
 
-pub fn spawn_target_dummy(mut commands: Commands, network: Option<ResMut<network::ServerNetwork>>) {
-    let Some(mut network) = network else {
-        return;
-    };
-
-    let dummy_id = network.allocate_entity_id();
-    commands.spawn((
-        network::NetworkEntity {
-            id: dummy_id,
-            kind: shared::protocol::NetworkEntityKind::Dummy,
-        },
-        Position { x: 220.0, y: 0.0 },
-        TargetDummy,
-        Health {
-            current: 150,
-            max: 150,
-        },
-    ));
-}
-
-#[derive(Component)]
-pub struct TargetDummy;
-
 pub fn combat_system(
     mut attack_requests: MessageReader<AttackRequest>,
     mut damage_events: MessageWriter<CombatDamageEvent>,
@@ -105,6 +82,17 @@ pub fn combat_system(
             death_events.write(CombatDeathEvent {
                 target_id: request.target_id,
             });
+        }
+    }
+}
+
+pub fn log_player_death_system(
+    mut death_events: MessageReader<CombatDeathEvent>,
+    players: Query<&network::NetworkEntity, With<network::PlayerCharacter>>,
+) {
+    for death in death_events.read() {
+        if players.iter().any(|player| player.id == death.target_id) {
+            info!("player {} died", death.target_id);
         }
     }
 }
