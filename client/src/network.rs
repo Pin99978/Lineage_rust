@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use shared::protocol::{
     decode_server_message, encode_client_message, AttackIntent, ClientMessage, EntityState,
-    NetworkEntityKind, ServerMessage,
+    LootIntent, NetworkEntityKind, ServerMessage,
 };
 use shared::{Health, Position};
 use std::collections::HashMap;
@@ -36,6 +36,9 @@ pub struct NetworkEntityVisual {
 #[derive(Component)]
 pub struct Attackable;
 
+#[derive(Component)]
+pub struct Lootable;
+
 pub fn setup_network(mut commands: Commands) {
     let Ok(server_addr) = SERVER_ADDR.parse() else {
         return;
@@ -56,13 +59,15 @@ pub fn setup_network(mut commands: Commands) {
 }
 
 pub fn send_move_intent(network: &ClientNetwork, intent: shared::protocol::MoveIntent) {
-    let message = ClientMessage::MoveIntent(intent);
-    send_to_server(network, &message);
+    send_to_server(network, &ClientMessage::MoveIntent(intent));
 }
 
 pub fn send_attack_intent(network: &ClientNetwork, intent: AttackIntent) {
-    let message = ClientMessage::AttackIntent(intent);
-    send_to_server(network, &message);
+    send_to_server(network, &ClientMessage::AttackIntent(intent));
+}
+
+pub fn send_loot_intent(network: &ClientNetwork, intent: LootIntent) {
+    send_to_server(network, &ClientMessage::LootIntent(intent));
 }
 
 fn send_to_server(network: &ClientNetwork, message: &ClientMessage) {
@@ -87,6 +92,8 @@ pub fn receive_server_state(
                 &mut Position,
                 &mut Health,
                 Option<&mut Sprite>,
+                Option<&Attackable>,
+                Option<&Lootable>,
             ),
             Without<Player>,
         >,
@@ -145,6 +152,26 @@ pub fn receive_server_state(
                     target_id: event.target_id,
                 });
             }
+            ServerMessage::ItemSpawnEvent(event) => {
+                spawn_or_update_item(
+                    &mut commands,
+                    &mut entity_map,
+                    event.item_id,
+                    event.x,
+                    event.y,
+                    event.item_type,
+                );
+            }
+            ServerMessage::ItemDespawnEvent(event) => {
+                if let Some(entity) = entity_map.entity_by_id.remove(&event.item_id) {
+                    commands.entity(entity).despawn();
+                }
+            }
+            ServerMessage::InventoryUpdate(event) => {
+                if local_player.id == Some(event.player_id) {
+                    info!("picked up {:?}, total {}", event.item_type, event.amount);
+                }
+            }
         }
     }
 }
@@ -163,6 +190,8 @@ fn apply_entity_state(
                 &mut Position,
                 &mut Health,
                 Option<&mut Sprite>,
+                Option<&Attackable>,
+                Option<&Lootable>,
             ),
             Without<Player>,
         >,
@@ -181,7 +210,7 @@ fn apply_entity_state(
         health.max = state.health_max;
         if let Some(mut sprite) = sprite {
             sprite.color = if state.alive {
-                Color::srgb(0.1, 0.4, 1.0)
+                systems::render::color_for_network_kind(NetworkEntityKind::Player)
             } else {
                 Color::srgb(0.35, 0.35, 0.35)
             };
@@ -192,9 +221,26 @@ fn apply_entity_state(
         return;
     }
 
+    if is_loot_kind(state.kind) {
+        spawn_or_update_item(
+            commands,
+            entity_map,
+            state.entity_id,
+            state.x,
+            state.y,
+            match state.kind {
+                NetworkEntityKind::LootGold => shared::ItemType::Gold,
+                NetworkEntityKind::LootHealthPotion => shared::ItemType::HealthPotion,
+                _ => shared::ItemType::Gold,
+            },
+        );
+        return;
+    }
+
     if let Some(existing_entity) = entity_map.entity_by_id.get(&state.entity_id).copied() {
         let mut visuals_query = state_queries.p1();
-        if let Ok((_, _, mut position, mut health, sprite)) = visuals_query.get_mut(existing_entity)
+        if let Ok((_, _, mut position, mut health, sprite, _, _)) =
+            visuals_query.get_mut(existing_entity)
         {
             position.x = state.x;
             position.y = state.y;
@@ -202,7 +248,7 @@ fn apply_entity_state(
             health.max = state.health_max;
             if let Some(mut sprite) = sprite {
                 sprite.color = if state.alive {
-                    color_for_kind(state.kind)
+                    systems::render::color_for_network_kind(state.kind)
                 } else {
                     Color::srgb(0.35, 0.35, 0.35)
                 };
@@ -224,7 +270,10 @@ fn apply_entity_state(
             current: state.health_current,
             max: state.health_max,
         },
-        Sprite::from_color(color_for_kind(state.kind), Vec2::splat(32.0)),
+        Sprite::from_color(
+            systems::render::color_for_network_kind(state.kind),
+            Vec2::splat(32.0),
+        ),
         Transform::from_xyz(state.x, state.y, 0.0),
     ));
     if state.kind == NetworkEntityKind::Enemy {
@@ -234,9 +283,52 @@ fn apply_entity_state(
     entity_map.entity_by_id.insert(state.entity_id, spawned);
 }
 
-fn color_for_kind(kind: NetworkEntityKind) -> Color {
-    match kind {
-        NetworkEntityKind::Player => Color::srgb(0.1, 0.6, 1.0),
-        NetworkEntityKind::Enemy => Color::srgb(0.85, 0.25, 0.2),
+fn spawn_or_update_item(
+    commands: &mut Commands,
+    entity_map: &mut NetworkEntityMap,
+    item_id: u64,
+    x: f32,
+    y: f32,
+    item_type: shared::ItemType,
+) {
+    let kind = match item_type {
+        shared::ItemType::Gold => NetworkEntityKind::LootGold,
+        shared::ItemType::HealthPotion => NetworkEntityKind::LootHealthPotion,
+    };
+
+    if let Some(entity) = entity_map.entity_by_id.get(&item_id).copied() {
+        commands
+            .entity(entity)
+            .insert(Position { x, y })
+            .insert(Transform::from_xyz(x, y, 0.0))
+            .insert(Sprite::from_color(
+                systems::render::color_for_network_kind(kind),
+                Vec2::splat(16.0),
+            ))
+            .insert(Lootable);
+        return;
     }
+
+    let entity = commands
+        .spawn((
+            NetworkEntityVisual { id: item_id },
+            Lootable,
+            systems::render::YSortable,
+            Position { x, y },
+            Health { current: 0, max: 0 },
+            Sprite::from_color(
+                systems::render::color_for_network_kind(kind),
+                Vec2::splat(16.0),
+            ),
+            Transform::from_xyz(x, y, 0.0),
+        ))
+        .id();
+    entity_map.entity_by_id.insert(item_id, entity);
+}
+
+fn is_loot_kind(kind: NetworkEntityKind) -> bool {
+    matches!(
+        kind,
+        NetworkEntityKind::LootGold | NetworkEntityKind::LootHealthPotion
+    )
 }

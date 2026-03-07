@@ -5,6 +5,7 @@ pub mod protocol;
 
 pub use components::ai::{AggroRange, AiState, AttackCooldown};
 pub use components::combat::{ActionState, CombatStats, Health};
+pub use components::item::{GroundItem, Inventory, ItemType, LootDropEntry, LootTable};
 pub use components::movement::{MoveSpeed, Position, TargetPosition};
 
 pub struct MovementComponentsPlugin;
@@ -19,6 +20,11 @@ impl Plugin for MovementComponentsPlugin {
             .register_type::<AttackCooldown>()
             .register_type::<Health>()
             .register_type::<CombatStats>()
-            .register_type::<ActionState>();
+            .register_type::<ActionState>()
+            .register_type::<GroundItem>()
+            .register_type::<Inventory>()
+            .register_type::<ItemType>()
+            .register_type::<LootDropEntry>()
+            .register_type::<LootTable>();
     }
 }

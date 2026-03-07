@@ -1,5 +1,7 @@
 use bevy::prelude::*;
-use shared::{AggroRange, AiState, AttackCooldown, CombatStats, Health, Position, TargetPosition};
+use shared::{
+    AggroRange, AiState, AttackCooldown, CombatStats, Health, LootTable, Position, TargetPosition,
+};
 
 use crate::{network, systems::combat};
 
@@ -32,6 +34,7 @@ pub fn spawn_enemies(mut commands: Commands, network: Option<ResMut<network::Ser
                 current: 120,
                 max: 120,
             },
+            LootTable::default(),
             CombatStats {
                 attack_power: 12,
                 attack_range: 52.0,
@@ -46,10 +49,14 @@ pub fn spawn_enemies(mut commands: Commands, network: Option<ResMut<network::Ser
 }
 
 pub fn ai_aggro_system(
-    mut enemies: Query<(&Position, &AggroRange, &mut AiState), With<EnemyAi>>,
+    mut enemies: Query<(&Position, &AggroRange, &Health, &mut AiState), With<EnemyAi>>,
     players: Query<(Entity, &Position, &Health), With<network::PlayerCharacter>>,
 ) {
-    for (enemy_position, aggro_range, mut ai_state) in &mut enemies {
+    for (enemy_position, aggro_range, enemy_health, mut ai_state) in &mut enemies {
+        if enemy_health.current <= 0 {
+            *ai_state = AiState::Idle;
+            continue;
+        }
         if !matches!(*ai_state, AiState::Idle) {
             continue;
         }
@@ -90,15 +97,16 @@ pub fn ai_chase_and_attack_system(
             &Position,
             &AggroRange,
             &CombatStats,
+            &Health,
             &mut AiState,
             &mut TargetPosition,
             &mut AttackCooldown,
         ),
-        With<EnemyAi>,
+        (With<EnemyAi>, Without<network::PlayerCharacter>),
     >,
     mut players: Query<
         (Entity, &Position, &network::NetworkEntity, &mut Health),
-        With<network::PlayerCharacter>,
+        (With<network::PlayerCharacter>, Without<EnemyAi>),
     >,
     mut damage_events: MessageWriter<combat::CombatDamageEvent>,
     mut death_events: MessageWriter<combat::CombatDeathEvent>,
@@ -107,11 +115,16 @@ pub fn ai_chase_and_attack_system(
         enemy_position,
         aggro_range,
         combat_stats,
+        enemy_health,
         mut ai_state,
         mut target_position,
         mut cooldown,
     ) in &mut enemies
     {
+        if enemy_health.current <= 0 {
+            *ai_state = AiState::Idle;
+            continue;
+        }
         cooldown.remaining_secs = (cooldown.remaining_secs - time.delta_secs()).max(0.0);
 
         let target_entity = match *ai_state {

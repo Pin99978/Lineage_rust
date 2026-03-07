@@ -1,13 +1,14 @@
 use bevy::prelude::*;
 use shared::protocol::{
     decode_client_message, encode_server_message, AttackIntent, ClientMessage, DamageEvent,
-    EntityState, NetworkEntityKind, ServerMessage,
+    EntityState, InventoryUpdate, ItemDespawnEvent, ItemSpawnEvent, LootIntent, NetworkEntityKind,
+    ServerMessage,
 };
-use shared::{ActionState, CombatStats, Health, MoveSpeed, Position, TargetPosition};
+use shared::{ActionState, CombatStats, Health, Inventory, MoveSpeed, Position, TargetPosition};
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 
-use crate::systems::combat;
+use crate::systems::{combat, drop, loot};
 
 const SERVER_BIND_ADDR: &str = "127.0.0.1:5000";
 const MAX_PACKET_SIZE: usize = 1024;
@@ -55,6 +56,7 @@ pub fn receive_client_messages(
     mut commands: Commands,
     network: Option<ResMut<ServerNetwork>>,
     mut attack_requests: MessageWriter<combat::AttackRequest>,
+    mut loot_requests: MessageWriter<loot::LootRequest>,
 ) {
     let Some(mut network) = network else {
         return;
@@ -81,6 +83,12 @@ pub fn receive_client_messages(
                 attack_requests.write(combat::AttackRequest {
                     attacker_entity: player_entity,
                     target_id,
+                });
+            }
+            ClientMessage::LootIntent(LootIntent { item_id }) => {
+                loot_requests.write(loot::LootRequest {
+                    looter_entity: player_entity,
+                    item_id,
                 });
             }
         }
@@ -114,6 +122,7 @@ fn ensure_client_player(
                 attack_speed: 1.0,
             },
             ActionState::default(),
+            Inventory::default(),
         ))
         .id();
     network.clients.insert(address, player_entity);
@@ -190,6 +199,66 @@ pub fn broadcast_combat_events(
         };
         for &address in network.clients.keys() {
             let _ = network.socket.send_to(&payload, address);
+        }
+    }
+}
+
+pub fn broadcast_item_events(
+    network: Option<Res<ServerNetwork>>,
+    mut spawned_items: MessageReader<drop::ItemSpawnedMessage>,
+    mut despawned_items: MessageReader<loot::ItemDespawnedMessage>,
+    mut inventory_updates: MessageReader<loot::InventoryUpdateMessage>,
+    players: Query<(Entity, &NetworkEntity), With<PlayerCharacter>>,
+) {
+    let Some(network) = network else {
+        return;
+    };
+
+    for spawned in spawned_items.read() {
+        let message = ServerMessage::ItemSpawnEvent(ItemSpawnEvent {
+            item_id: spawned.item_id,
+            item_type: spawned.item_type,
+            amount: spawned.amount,
+            x: spawned.x,
+            y: spawned.y,
+        });
+        let Ok(payload) = encode_server_message(&message) else {
+            continue;
+        };
+        for &address in network.clients.keys() {
+            let _ = network.socket.send_to(&payload, address);
+        }
+    }
+
+    for despawned in despawned_items.read() {
+        let message = ServerMessage::ItemDespawnEvent(ItemDespawnEvent {
+            item_id: despawned.item_id,
+        });
+        let Ok(payload) = encode_server_message(&message) else {
+            continue;
+        };
+        for &address in network.clients.keys() {
+            let _ = network.socket.send_to(&payload, address);
+        }
+    }
+
+    for inventory in inventory_updates.read() {
+        let message = ServerMessage::InventoryUpdate(InventoryUpdate {
+            player_id: inventory.player_id,
+            item_type: inventory.item_type,
+            amount: inventory.amount,
+        });
+        let Ok(payload) = encode_server_message(&message) else {
+            continue;
+        };
+
+        for (&address, &entity) in &network.clients {
+            let Ok((_, player_network)) = players.get(entity) else {
+                continue;
+            };
+            if player_network.id == inventory.player_id {
+                let _ = network.socket.send_to(&payload, address);
+            }
         }
     }
 }

@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use shared::protocol::{AttackIntent, MoveIntent};
+use shared::protocol::{AttackIntent, LootIntent, MoveIntent};
 use shared::Health;
 
 use crate::network;
@@ -9,6 +9,7 @@ pub fn capture_movement_intent(
     window_query: Query<&Window>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     network: Option<Res<network::ClientNetwork>>,
+    lootables: Query<(&Transform, &network::NetworkEntityVisual), With<network::Lootable>>,
     attackables: Query<
         (&Transform, &network::NetworkEntityVisual, &Health),
         With<network::Attackable>,
@@ -35,6 +36,15 @@ pub fn capture_movement_intent(
     let Some(network) = network else {
         return;
     };
+
+    let clicked_loot = lootables
+        .iter()
+        .find(|(transform, _)| transform.translation.truncate().distance(world_position) <= 18.0)
+        .map(|(_, visual)| visual.id);
+    if let Some(item_id) = clicked_loot {
+        network::send_loot_intent(&network, LootIntent { item_id });
+        return;
+    }
 
     let clicked_target = attackables
         .iter()

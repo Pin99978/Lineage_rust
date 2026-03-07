@@ -16,6 +16,10 @@ fn main() {
         .add_message::<systems::combat::AttackRequest>()
         .add_message::<systems::combat::CombatDamageEvent>()
         .add_message::<systems::combat::CombatDeathEvent>()
+        .add_message::<systems::drop::ItemSpawnedMessage>()
+        .add_message::<systems::loot::LootRequest>()
+        .add_message::<systems::loot::ItemDespawnedMessage>()
+        .add_message::<systems::loot::InventoryUpdateMessage>()
         .add_systems(
             Startup,
             (network::setup_network, systems::ai::spawn_enemies).chain(),
@@ -28,9 +32,12 @@ fn main() {
                 systems::ai::ai_chase_and_attack_system,
                 systems::movement::movement_system,
                 systems::combat::combat_system,
+                systems::drop::item_drop_system,
+                systems::loot::loot_system,
                 systems::combat::log_player_death_system,
                 network::broadcast_world_state,
                 network::broadcast_combat_events,
+                network::broadcast_item_events,
             )
                 .chain(),
         )
