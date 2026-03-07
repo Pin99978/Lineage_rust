@@ -8,6 +8,7 @@ const DIRECTIONS: usize = 8;
 const FULL_SHEET_FRAMES_PER_STATE: usize = 3;
 const FULL_SHEET_STATES: usize = 4;
 const DIRECTIONAL_SHEET_FRAMES: usize = 8;
+const FALLBACK_FRAMES_PER_DIRECTION: usize = 6;
 
 #[derive(Resource, Clone)]
 pub struct CharacterVisualAssets {
@@ -179,6 +180,16 @@ pub fn apply_character_atlas_when_ready(
             });
         }
 
+        // Placeholder art can be uneven; default to 6x8 slicing before
+        // falling back to a static sprite.
+        if width >= FALLBACK_FRAMES_PER_DIRECTION as u32 && height >= DIRECTIONS as u32 {
+            return Some(AtlasConfig {
+                frames_per_state: FALLBACK_FRAMES_PER_DIRECTION,
+                directions: DIRECTIONS,
+                state_count: 1,
+            });
+        }
+
         None
     });
 
@@ -189,8 +200,8 @@ pub fn apply_character_atlas_when_ready(
             };
             let width = image.texture_descriptor.size.width;
             let height = image.texture_descriptor.size.height;
-            let tile_w = width / config.frames_per_state as u32;
-            let tile_h = height / (config.directions as u32 * config.state_count as u32);
+            let tile_w = (width / config.frames_per_state as u32).max(1);
+            let tile_h = (height / (config.directions as u32 * config.state_count as u32)).max(1);
             let layout = atlas_layouts.add(TextureAtlasLayout::from_grid(
                 UVec2::new(tile_w, tile_h),
                 config.frames_per_state as u32,

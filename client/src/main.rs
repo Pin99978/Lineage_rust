@@ -1,5 +1,7 @@
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
+use bevy::render::view::{ColorGrading, ColorGradingGlobal};
 use shared::{Health, MovementComponentsPlugin, Position};
 
 mod network;
@@ -113,7 +115,7 @@ fn setup(mut commands: Commands, asset_server: Option<Res<AssetServer>>) {
     commands.spawn((
         Name::new("FallbackBackground"),
         Sprite::from_color(Color::srgb(0.16, 0.16, 0.18), Vec2::new(2000.0, 2000.0)),
-        Transform::from_xyz(0.0, 0.0, -120.0),
+        Transform::from_xyz(0.0, 0.0, -20.0),
     ));
 
     if let Some(asset_server) = asset_server {
@@ -121,7 +123,7 @@ fn setup(mut commands: Commands, asset_server: Option<Res<AssetServer>>) {
         commands.spawn((
             Name::new("MapBackground"),
             Sprite::from_image(map_bg),
-            Transform::from_xyz(0.0, 0.0, -110.0),
+            Transform::from_xyz(0.0, 0.0, -10.0),
         ));
     }
 
@@ -136,5 +138,16 @@ fn setup(mut commands: Commands, asset_server: Option<Res<AssetServer>>) {
 }
 
 fn setup_camera(mut commands: Commands) {
-    commands.spawn((Camera2d, Bloom::NATURAL));
+    commands.spawn((
+        Camera2d,
+        Bloom::NATURAL,
+        Tonemapping::TonyMcMapface,
+        ColorGrading {
+            global: ColorGradingGlobal {
+                exposure: -0.2,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    ));
 }
