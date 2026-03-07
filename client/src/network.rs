@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use shared::protocol::{
     decode_server_message, encode_client_message, AttackIntent, CastSpellIntent, ClientMessage,
-    EntityState, EquipIntent, LoginRequest, LootIntent, NetworkEntityKind, ServerMessage,
-    UnequipIntent,
+    EntityState, EquipIntent, InteractIntent, LoginRequest, LootIntent, NetworkEntityKind,
+    ServerMessage, UnequipIntent,
 };
 use shared::{EquipmentSlot, Health, ItemType, Position, SpellType};
 use std::collections::HashMap;
@@ -39,6 +39,9 @@ pub struct Attackable;
 
 #[derive(Component)]
 pub struct Lootable;
+
+#[derive(Component)]
+pub struct NpcInteractable;
 
 pub fn setup_network(mut commands: Commands) {
     let Ok(server_addr) = SERVER_ADDR.parse() else {
@@ -87,6 +90,10 @@ pub fn send_unequip_intent(network: &ClientNetwork, intent: UnequipIntent) {
     send_to_server(network, &ClientMessage::UnequipIntent(intent));
 }
 
+pub fn send_interact_intent(network: &ClientNetwork, intent: InteractIntent) {
+    send_to_server(network, &ClientMessage::InteractIntent(intent));
+}
+
 fn send_to_server(network: &ClientNetwork, message: &ClientMessage) {
     let Ok(payload) = encode_client_message(message) else {
         return;
@@ -115,6 +122,7 @@ pub fn receive_server_state(
                 Option<&mut Sprite>,
                 Option<&Attackable>,
                 Option<&Lootable>,
+                Option<&NpcInteractable>,
             ),
             Without<Player>,
         >,
@@ -122,6 +130,7 @@ pub fn receive_server_state(
     mut damage_feedback: MessageWriter<systems::combat_render::DamagePopupEvent>,
     mut death_feedback: MessageWriter<systems::combat_render::DeathVisualEvent>,
     mut attack_animation: MessageWriter<systems::animation::PlayAttackAnimation>,
+    dialog_state: Option<ResMut<systems::ui::DialogState>>,
 ) {
     let Some(network) = network else {
         return;
@@ -136,6 +145,9 @@ pub fn receive_server_state(
         return;
     };
     let Some(mut entity_map) = entity_map else {
+        return;
+    };
+    let Some(mut dialog_state) = dialog_state else {
         return;
     };
 
@@ -244,6 +256,13 @@ pub fn receive_server_state(
                     event.target_id, event.amount, event.resulting_hp
                 );
             }
+            ServerMessage::DialogEvent(event) => {
+                if local_player.id == Some(event.player_id) {
+                    dialog_state.text = event.text;
+                    dialog_state.visible = true;
+                    dialog_state.timer.reset();
+                }
+            }
         }
     }
 }
@@ -264,6 +283,7 @@ fn apply_entity_state(
                 Option<&mut Sprite>,
                 Option<&Attackable>,
                 Option<&Lootable>,
+                Option<&NpcInteractable>,
             ),
             Without<Player>,
         >,
@@ -311,7 +331,7 @@ fn apply_entity_state(
 
     if let Some(existing_entity) = entity_map.entity_by_id.get(&state.entity_id).copied() {
         let mut visuals_query = state_queries.p1();
-        if let Ok((_, _, mut position, mut health, sprite, _, _)) =
+        if let Ok((_, _, mut position, mut health, sprite, _, _, _)) =
             visuals_query.get_mut(existing_entity)
         {
             position.x = state.x;
@@ -354,6 +374,8 @@ fn apply_entity_state(
     ));
     if state.kind == NetworkEntityKind::Enemy {
         entity_commands.insert(Attackable);
+    } else if state.kind == NetworkEntityKind::NpcMerchant {
+        entity_commands.insert(NpcInteractable);
     }
     let spawned = entity_commands.id();
     entity_map.entity_by_id.insert(state.entity_id, spawned);

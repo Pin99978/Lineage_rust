@@ -8,44 +8,42 @@ use crate::{network, systems::combat};
 #[derive(Component)]
 pub struct EnemyAi;
 
-pub fn spawn_enemies(mut commands: Commands, network: Option<ResMut<network::ServerNetwork>>) {
-    let Some(mut network) = network else {
-        return;
-    };
-
-    let enemy_positions = [Vec2::new(180.0, 120.0), Vec2::new(260.0, -70.0)];
-    for position in enemy_positions {
-        let enemy_id = network.allocate_entity_id();
-        commands.spawn((
-            EnemyAi,
-            network::NetworkEntity {
-                id: enemy_id,
-                kind: shared::protocol::NetworkEntityKind::Enemy,
-            },
-            Position {
-                x: position.x,
-                y: position.y,
-            },
-            TargetPosition {
-                x: position.x,
-                y: position.y,
-            },
-            Health {
-                current: 120,
-                max: 120,
-            },
-            LootTable::default(),
-            CombatStats {
-                attack_power: 12,
-                attack_range: 52.0,
-                attack_speed: 1.2,
-            },
-            shared::MoveSpeed { value: 220.0 },
-            AggroRange(300.0),
-            AiState::Idle,
-            AttackCooldown::default(),
-        ));
-    }
+pub fn spawn_enemy_at(
+    commands: &mut Commands,
+    network: &mut ResMut<network::ServerNetwork>,
+    position: Vec2,
+) -> Entity {
+    let enemy_id = network.allocate_entity_id();
+    let entity = commands.spawn((
+        EnemyAi,
+        network::NetworkEntity {
+            id: enemy_id,
+            kind: shared::protocol::NetworkEntityKind::Enemy,
+        },
+        Position {
+            x: position.x,
+            y: position.y,
+        },
+        TargetPosition {
+            x: position.x,
+            y: position.y,
+        },
+        Health {
+            current: 120,
+            max: 120,
+        },
+        LootTable::default(),
+        CombatStats {
+            attack_power: 12,
+            attack_range: 52.0,
+            attack_speed: 1.2,
+        },
+        shared::MoveSpeed { value: 220.0 },
+        AggroRange(300.0),
+        AiState::Idle,
+        AttackCooldown::default(),
+    ));
+    entity.id()
 }
 
 pub fn ai_aggro_system(

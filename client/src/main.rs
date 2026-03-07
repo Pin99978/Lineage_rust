@@ -22,6 +22,7 @@ fn main() {
             submitted: false,
         })
         .insert_resource(systems::ui::HudState::default())
+        .insert_resource(systems::ui::DialogState::default())
         .add_message::<systems::combat_render::DamagePopupEvent>()
         .add_message::<systems::combat_render::DeathVisualEvent>()
         .add_message::<systems::animation::PlayAttackAnimation>()
@@ -50,6 +51,8 @@ fn main() {
             (
                 network::receive_server_state,
                 systems::ui::login_submit_system.run_if(in_state(systems::ui::AppState::LoginMenu)),
+                systems::interaction::capture_click_intent
+                    .run_if(in_state(systems::ui::AppState::InGame)),
                 systems::input::capture_movement_intent
                     .run_if(in_state(systems::ui::AppState::InGame)),
                 systems::animation::attach_animation_components,
@@ -62,6 +65,13 @@ fn main() {
                 systems::ui::update_player_health_hud,
                 systems::ui::update_player_mana_hud,
                 systems::ui::update_equipment_text_hud,
+                systems::ui::update_dialog_hud,
+            )
+                .chain(),
+        )
+        .add_systems(
+            Update,
+            (
                 systems::combat_render::update_world_health_bars,
                 systems::combat_render::apply_damage_feedback,
                 systems::combat_render::apply_death_feedback,

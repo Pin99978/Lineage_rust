@@ -14,7 +14,7 @@ use std::time::Instant;
 
 use crate::{
     db,
-    systems::{combat, drop, equipment, loot, spell},
+    systems::{combat, drop, equipment, interaction, loot, spell},
 };
 
 const SERVER_BIND_ADDR: &str = "127.0.0.1:5000";
@@ -100,6 +100,7 @@ pub fn receive_client_messages(
     mut cast_spell_requests: MessageWriter<spell::CastSpellRequest>,
     mut equip_requests: MessageWriter<equipment::EquipRequest>,
     mut unequip_requests: MessageWriter<equipment::UnequipRequest>,
+    mut interact_requests: MessageWriter<interaction::InteractRequest>,
 ) {
     let Some(mut network) = network else {
         return;
@@ -255,6 +256,21 @@ pub fn receive_client_messages(
                     unequip_requests.write(equipment::UnequipRequest {
                         player_entity,
                         slot: intent.slot,
+                    });
+                }
+            }
+            ClientMessage::InteractIntent(intent) => {
+                let session = network
+                    .sessions
+                    .entry(address)
+                    .or_insert_with(SessionState::new);
+                if !session.logged_in {
+                    continue;
+                }
+                if let Some(player_entity) = session.entity {
+                    interact_requests.write(interaction::InteractRequest {
+                        player_entity,
+                        target_id: intent.target_id,
                     });
                 }
             }
@@ -728,6 +744,27 @@ pub fn broadcast_equipment_events(
         };
         for (&address, session) in &network.sessions {
             if session.logged_in && session.player_id == Some(changed.player_id) {
+                let _ = network.socket.send_to(&payload, address);
+            }
+        }
+    }
+}
+
+pub fn broadcast_dialog_events(
+    network: Option<Res<ServerNetwork>>,
+    mut dialog_events: MessageReader<interaction::DialogMessage>,
+) {
+    let Some(network) = network else {
+        return;
+    };
+
+    for dialog in dialog_events.read() {
+        let message = ServerMessage::DialogEvent(interaction::to_dialog_event(dialog));
+        let Ok(payload) = encode_server_message(&message) else {
+            continue;
+        };
+        for (&address, session) in &network.sessions {
+            if session.logged_in && session.player_id == Some(dialog.player_id) {
                 let _ = network.socket.send_to(&payload, address);
             }
         }

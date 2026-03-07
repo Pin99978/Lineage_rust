@@ -12,6 +12,8 @@ pub use components::item::{
     LootDropEntry, LootTable, StatModifier,
 };
 pub use components::movement::{MoveSpeed, Position, TargetPosition};
+pub use components::npc::{Npc, NpcMarker, NpcType};
+pub use components::world::{SpawnType, Spawner};
 
 pub struct MovementComponentsPlugin;
 
@@ -37,6 +39,11 @@ impl Plugin for MovementComponentsPlugin {
             .register_type::<StatModifier>()
             .register_type::<EquipmentMap>()
             .register_type::<LootDropEntry>()
-            .register_type::<LootTable>();
+            .register_type::<LootTable>()
+            .register_type::<NpcType>()
+            .register_type::<Npc>()
+            .register_type::<NpcMarker>()
+            .register_type::<SpawnType>()
+            .register_type::<Spawner>();
     }
 }

@@ -11,6 +11,7 @@ pub enum ClientMessage {
     CastSpellIntent(CastSpellIntent),
     EquipIntent(EquipIntent),
     UnequipIntent(UnequipIntent),
+    InteractIntent(InteractIntent),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +51,11 @@ pub struct UnequipIntent {
     pub slot: EquipmentSlot,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct InteractIntent {
+    pub target_id: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerMessage {
     LoginResponse(LoginResponse),
@@ -63,6 +69,7 @@ pub enum ServerMessage {
     ManaUpdate(ManaUpdate),
     EquipmentUpdate(EquipmentUpdate),
     HealEvent(HealEvent),
+    DialogEvent(DialogEvent),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,6 +82,7 @@ pub struct LoginResponse {
 pub enum NetworkEntityKind {
     Player,
     Enemy,
+    NpcMerchant,
     LootGold,
     LootHealthPotion,
 }
@@ -141,6 +149,12 @@ pub struct HealEvent {
     pub target_id: u64,
     pub amount: i32,
     pub resulting_hp: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DialogEvent {
+    pub player_id: u64,
+    pub text: String,
 }
 
 pub fn encode_client_message(message: &ClientMessage) -> Result<Vec<u8>, bincode::Error> {

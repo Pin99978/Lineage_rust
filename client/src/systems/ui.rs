@@ -34,6 +34,23 @@ impl Default for HudState {
     }
 }
 
+#[derive(Resource, Debug, Clone)]
+pub struct DialogState {
+    pub text: String,
+    pub timer: Timer,
+    pub visible: bool,
+}
+
+impl Default for DialogState {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            timer: Timer::from_seconds(4.0, TimerMode::Once),
+            visible: false,
+        }
+    }
+}
+
 #[derive(Component)]
 pub struct LoginMenuRoot;
 
@@ -45,6 +62,9 @@ pub struct PlayerManaBarUi;
 
 #[derive(Component)]
 pub struct EquipmentTextUi;
+
+#[derive(Component)]
+pub struct DialogTextUi;
 
 pub fn setup_login_menu(mut commands: Commands, login_name: Option<Res<LoginName>>) {
     let username = login_name
@@ -206,6 +226,31 @@ pub fn setup_ui(mut commands: Commands) {
     commands.entity(mana_bg).add_child(mana_fill);
     commands.entity(root).add_child(equipment_text);
     commands.entity(root).add_child(hint_text);
+
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(24.0),
+            left: Val::Percent(50.0),
+            margin: UiRect {
+                left: Val::Px(-180.0),
+                ..Default::default()
+            },
+            width: Val::Px(360.0),
+            height: Val::Px(72.0),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            ..Default::default()
+        },
+        BackgroundColor(Color::srgba(0.02, 0.02, 0.03, 0.85)),
+        Visibility::Hidden,
+        children![(
+            DialogTextUi,
+            Text::new(""),
+            TextFont::from_font_size(20.0),
+            TextColor(Color::srgb(0.95, 0.95, 0.9))
+        )],
+    ));
 }
 
 pub fn update_player_health_hud(
@@ -265,4 +310,37 @@ pub fn update_equipment_text_hud(
         "Equip: Weapon={:?} Armor={:?}",
         hud_state.equipment.weapon, hud_state.equipment.armor
     ));
+}
+
+#[allow(clippy::type_complexity)]
+pub fn update_dialog_hud(
+    time: Res<Time>,
+    dialog_state: Option<ResMut<DialogState>>,
+    mut nodes: Query<(&mut Visibility, &Children), Without<DialogTextUi>>,
+    mut texts: Query<&mut Text, With<DialogTextUi>>,
+) {
+    let Some(mut dialog_state) = dialog_state else {
+        return;
+    };
+
+    if dialog_state.visible {
+        dialog_state.timer.tick(time.delta());
+        if dialog_state.timer.is_finished() {
+            dialog_state.visible = false;
+        }
+    }
+
+    for (mut visibility, children) in &mut nodes {
+        for child in children.iter() {
+            if let Ok(mut text) = texts.get_mut(child) {
+                if dialog_state.visible {
+                    *visibility = Visibility::Visible;
+                    *text = Text::new(dialog_state.text.clone());
+                } else {
+                    *visibility = Visibility::Hidden;
+                }
+                return;
+            }
+        }
+    }
 }
