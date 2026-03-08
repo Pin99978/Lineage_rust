@@ -72,9 +72,9 @@ pub fn portal_system(
             &mut MapId,
             &mut PathQueue,
         ),
-        With<network::PlayerCharacter>,
+        (With<network::PlayerCharacter>, Without<Portal>),
     >,
-    portals: Query<(&Position, &MapId, &Portal)>,
+    portals: Query<(&Position, &MapId, &Portal), Without<network::PlayerCharacter>>,
     mut map_changed: MessageWriter<MapChangedMessage>,
 ) {
     for (player_network, mut position, mut target, mut player_map, mut path_queue) in &mut players {
