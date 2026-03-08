@@ -1,12 +1,13 @@
 use bevy::prelude::*;
-use shared::protocol::LoginRequest;
-use shared::{EquipmentMap, Health, StatusEffect};
+use shared::protocol::{InteractNpcIntent, LoginRequest};
+use shared::{EquipmentMap, Health, QuestId, QuestStatus, StatusEffect};
 
 use crate::{network, Player};
 
 pub mod chat;
 pub mod inventory;
 pub mod paperdoll;
+pub mod quest_log;
 
 #[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AppState {
@@ -27,6 +28,7 @@ pub struct HudState {
     pub mana_max: i32,
     pub equipment: EquipmentMap,
     pub status_effects: Vec<StatusEffect>,
+    pub quest_entries: Vec<(QuestId, QuestStatus)>,
 }
 
 impl Default for HudState {
@@ -36,6 +38,7 @@ impl Default for HudState {
             mana_max: 60,
             equipment: EquipmentMap::default(),
             status_effects: Vec::new(),
+            quest_entries: Vec::new(),
         }
     }
 }
@@ -43,6 +46,8 @@ impl Default for HudState {
 #[derive(Resource, Debug, Clone)]
 pub struct DialogState {
     pub text: String,
+    pub choices: Vec<String>,
+    pub npc_id: Option<u64>,
     pub timer: Timer,
     pub visible: bool,
 }
@@ -51,6 +56,8 @@ impl Default for DialogState {
     fn default() -> Self {
         Self {
             text: String::new(),
+            choices: Vec::new(),
+            npc_id: None,
             timer: Timer::from_seconds(4.0, TimerMode::Once),
             visible: false,
         }
@@ -278,6 +285,7 @@ pub fn setup_ui(mut commands: Commands) {
     chat::setup_chat_ui(&mut commands);
     inventory::setup_inventory_ui(&mut commands);
     paperdoll::setup_paperdoll_ui(&mut commands);
+    quest_log::setup_quest_log_ui(&mut commands);
 }
 
 pub fn update_player_health_hud(
@@ -387,8 +395,14 @@ pub fn update_dialog_hud(
         for child in children.iter() {
             if let Ok(mut text) = texts.get_mut(child) {
                 if dialog_state.visible {
+                    let mut dialogue_text = dialog_state.text.clone();
+                    if !dialog_state.choices.is_empty() {
+                        for (index, choice) in dialog_state.choices.iter().enumerate() {
+                            dialogue_text.push_str(&format!("\n{}. {}", index + 1, choice));
+                        }
+                    }
                     *visibility = Visibility::Visible;
-                    *text = Text::new(dialog_state.text.clone());
+                    *text = Text::new(dialogue_text);
                 } else {
                     *visibility = Visibility::Hidden;
                 }
@@ -396,4 +410,46 @@ pub fn update_dialog_hud(
             }
         }
     }
+}
+
+pub fn dialog_choice_input_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    network: Option<Res<network::ClientNetwork>>,
+    dialog_state: Option<ResMut<DialogState>>,
+) {
+    let Some(network) = network else {
+        return;
+    };
+    let Some(mut dialog_state) = dialog_state else {
+        return;
+    };
+    if !dialog_state.visible || dialog_state.choices.is_empty() {
+        return;
+    }
+    let Some(npc_id) = dialog_state.npc_id else {
+        return;
+    };
+
+    let picked = if keyboard.just_pressed(KeyCode::Digit1) {
+        Some(1_u8)
+    } else if keyboard.just_pressed(KeyCode::Digit2) {
+        Some(2_u8)
+    } else {
+        None
+    };
+    let Some(choice_index) = picked else {
+        return;
+    };
+    if choice_index as usize > dialog_state.choices.len() {
+        return;
+    }
+
+    network::send_interact_npc_intent(
+        &network,
+        InteractNpcIntent {
+            target_id: npc_id,
+            choice_index: Some(choice_index),
+        },
+    );
+    dialog_state.visible = false;
 }

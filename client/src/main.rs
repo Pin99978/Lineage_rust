@@ -61,6 +61,8 @@ fn main() {
                     .run_if(in_state(systems::ui::AppState::InGame)),
                 systems::ui::chat::chat_text_input_system
                     .run_if(in_state(systems::ui::AppState::InGame)),
+                systems::ui::dialog_choice_input_system
+                    .run_if(in_state(systems::ui::AppState::InGame)),
                 systems::ui::inventory::toggle_inventory_window_system
                     .run_if(in_state(systems::ui::AppState::InGame)),
                 systems::ui::paperdoll::toggle_paperdoll_window_system
@@ -94,6 +96,7 @@ fn main() {
                 systems::ui::paperdoll::refresh_paperdoll_ui_system,
                 systems::ui::inventory::inventory_click_equip_system,
                 systems::ui::paperdoll::paperdoll_click_unequip_system,
+                systems::ui::quest_log::update_quest_log_ui,
             )
                 .chain(),
         )

@@ -252,7 +252,9 @@ pub fn ai_chase_and_attack_system(
 
             if player_health.current == 0 {
                 death_events.write(combat::CombatDeathEvent {
+                    target_entity: target_entity,
                     target_id: player_network.id,
+                    killer_player_id: None,
                 });
             }
         } else {

@@ -18,7 +18,9 @@ pub struct CombatDamageEvent {
 
 #[derive(Message, Debug, Clone, Copy)]
 pub struct CombatDeathEvent {
+    pub target_entity: Entity,
     pub target_id: u64,
+    pub killer_player_id: Option<u64>,
 }
 
 #[derive(Message, Debug, Clone)]
@@ -32,14 +34,20 @@ pub fn combat_system(
     mut damage_events: MessageWriter<CombatDamageEvent>,
     mut death_events: MessageWriter<CombatDeathEvent>,
     mut attackers: Query<
-        (&Position, &CombatStats, &mut ActionState, Option<&Buffs>),
+        (
+            &Position,
+            &CombatStats,
+            &mut ActionState,
+            Option<&Buffs>,
+            &network::NetworkEntity,
+        ),
         With<network::PlayerCharacter>,
     >,
     target_lookup: Query<(Entity, &network::NetworkEntity, &Position, Option<&Buffs>)>,
     mut target_health: Query<&mut Health>,
 ) {
     for request in attack_requests.read() {
-        let Ok((attacker_position, combat_stats, mut action_state, attacker_buffs)) =
+        let Ok((attacker_position, combat_stats, mut action_state, attacker_buffs, attacker_net)) =
             attackers.get_mut(request.attacker_entity)
         else {
             continue;
@@ -84,7 +92,9 @@ pub fn combat_system(
         });
         if health.current == 0 {
             death_events.write(CombatDeathEvent {
+                target_entity,
                 target_id: request.target_id,
+                killer_player_id: Some(attacker_net.id),
             });
         }
     }
@@ -105,7 +115,7 @@ pub fn update_status_effects_system(
 ) {
     let delta = time.delta_secs();
 
-    for (_entity, network_entity, mut health, mut buffs, player_marker) in &mut entities {
+    for (entity, network_entity, mut health, mut buffs, player_marker) in &mut entities {
         let mut changed = false;
         let mut poison_damage = 0_i32;
 
@@ -130,7 +140,9 @@ pub fn update_status_effects_system(
             });
             if health.current == 0 {
                 death_events.write(CombatDeathEvent {
+                    target_entity: entity,
                     target_id: network_entity.id,
+                    killer_player_id: None,
                 });
             }
         }

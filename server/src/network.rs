@@ -15,7 +15,9 @@ use std::time::Instant;
 
 use crate::{
     db,
-    systems::{chat, combat, drop, equipment, interaction, item, loot, movement, spell},
+    systems::{
+        chat, combat, drop, equipment, interaction, item, loot, movement, npc, quest, spell,
+    },
 };
 
 const SERVER_BIND_ADDR: &str = "127.0.0.1:5000";
@@ -96,6 +98,7 @@ pub fn receive_client_messages(
         &shared::Inventory,
         &shared::EquipmentMap,
         &Buffs,
+        &shared::QuestTracker,
     )>,
     mut attack_requests: MessageWriter<combat::AttackRequest>,
     mut loot_requests: MessageWriter<loot::LootRequest>,
@@ -103,6 +106,7 @@ pub fn receive_client_messages(
     mut equip_requests: MessageWriter<equipment::EquipRequest>,
     mut unequip_requests: MessageWriter<equipment::UnequipRequest>,
     mut interact_requests: MessageWriter<interaction::InteractRequest>,
+    mut npc_interact_requests: MessageWriter<npc::NpcInteractRequest>,
     mut chat_requests: MessageWriter<chat::ChatRequest>,
     mut move_requests: MessageWriter<movement::MoveRequest>,
     mut use_item_requests: MessageWriter<item::UseItemRequest>,
@@ -141,8 +145,15 @@ pub fn receive_client_messages(
                         if let (Some(username), Some(entity)) =
                             (existing.username.clone(), existing.entity)
                         {
-                            if let Ok((position, health, mana, inventory, equipment, _buffs)) =
-                                player_snapshot.get(entity)
+                            if let Ok((
+                                position,
+                                health,
+                                mana,
+                                inventory,
+                                equipment,
+                                _buffs,
+                                quests,
+                            )) = player_snapshot.get(entity)
                             {
                                 let _ = db_bridge.command_tx.send(db::DbCommand::SavePlayer {
                                     data: db::PersistedPlayer {
@@ -155,6 +166,7 @@ pub fn receive_client_messages(
                                         mana_max: mana.max,
                                         inventory: inventory.clone(),
                                         equipment: equipment.clone(),
+                                        quests: quests.clone(),
                                     },
                                 });
                             }
@@ -279,6 +291,27 @@ pub fn receive_client_messages(
                         player_entity,
                         target_id: intent.target_id,
                     });
+                    npc_interact_requests.write(npc::NpcInteractRequest {
+                        player_entity,
+                        target_id: intent.target_id,
+                        choice_index: None,
+                    });
+                }
+            }
+            ClientMessage::InteractNpcIntent(intent) => {
+                let session = network
+                    .sessions
+                    .entry(address)
+                    .or_insert_with(SessionState::new);
+                if !session.logged_in {
+                    continue;
+                }
+                if let Some(player_entity) = session.entity {
+                    npc_interact_requests.write(npc::NpcInteractRequest {
+                        player_entity,
+                        target_id: intent.target_id,
+                        choice_index: intent.choice_index,
+                    });
                 }
             }
             ClientMessage::ChatIntent(ChatIntent {
@@ -332,6 +365,7 @@ fn handle_login_request(
         &shared::Inventory,
         &shared::EquipmentMap,
         &Buffs,
+        &shared::QuestTracker,
     )>,
     address: SocketAddr,
     username: String,
@@ -447,9 +481,11 @@ fn send_player_snapshot(
         &shared::Inventory,
         &shared::EquipmentMap,
         &Buffs,
+        &shared::QuestTracker,
     )>,
 ) {
-    let Ok((_, _, mana, inventory, equipment, buffs)) = player_snapshot.get(player_entity) else {
+    let Ok((_, _, mana, inventory, equipment, buffs, quests)) = player_snapshot.get(player_entity)
+    else {
         return;
     };
 
@@ -488,6 +524,17 @@ fn send_player_snapshot(
     if let Ok(payload) = encode_server_message(&status_message) {
         let _ = socket.send_to(&payload, address);
     }
+
+    for quest in &quests.active_quests {
+        let quest_message = ServerMessage::QuestUpdateEvent(shared::protocol::QuestUpdateEvent {
+            player_id,
+            quest_id: quest.id,
+            status: quest.status.clone(),
+        });
+        if let Ok(payload) = encode_server_message(&quest_message) {
+            let _ = socket.send_to(&payload, address);
+        }
+    }
 }
 
 pub fn cleanup_stale_sessions(
@@ -500,6 +547,7 @@ pub fn cleanup_stale_sessions(
         &Mana,
         &shared::Inventory,
         &shared::EquipmentMap,
+        &shared::QuestTracker,
     )>,
 ) {
     let Some(mut network) = network else {
@@ -521,7 +569,9 @@ pub fn cleanup_stale_sessions(
             if let (Some(username), Some(entity), Some(db_bridge)) =
                 (session.username.clone(), session.entity, db_bridge.as_ref())
             {
-                if let Ok((position, health, mana, inventory, equipment)) = players.get(entity) {
+                if let Ok((position, health, mana, inventory, equipment, quests)) =
+                    players.get(entity)
+                {
                     let _ = db_bridge.command_tx.send(db::DbCommand::SavePlayer {
                         data: db::PersistedPlayer {
                             username,
@@ -533,6 +583,7 @@ pub fn cleanup_stale_sessions(
                             mana_max: mana.max,
                             inventory: inventory.clone(),
                             equipment: equipment.clone(),
+                            quests: quests.clone(),
                         },
                     });
                 }
@@ -614,6 +665,7 @@ pub fn apply_db_results(
                     data.equipment.clone(),
                 ));
                 player_commands.insert(MapId(MAP_TOWN.to_string()));
+                player_commands.insert(data.quests.clone());
                 let player_entity = player_commands.id();
 
                 let session = network
@@ -673,6 +725,18 @@ pub fn apply_db_results(
                 });
                 if let Ok(payload) = encode_server_message(&status_message) {
                     let _ = network.socket.send_to(&payload, address);
+                }
+
+                for quest in &data.quests.active_quests {
+                    let quest_message =
+                        ServerMessage::QuestUpdateEvent(shared::protocol::QuestUpdateEvent {
+                            player_id,
+                            quest_id: quest.id,
+                            status: quest.status.clone(),
+                        });
+                    if let Ok(payload) = encode_server_message(&quest_message) {
+                        let _ = network.socket.send_to(&payload, address);
+                    }
                 }
             }
             db::DbResult::LoginFailed { address, message } => {
@@ -910,19 +974,44 @@ pub fn broadcast_equipment_events(
 
 pub fn broadcast_dialog_events(
     network: Option<Res<ServerNetwork>>,
-    mut dialog_events: MessageReader<interaction::DialogMessage>,
+    mut dialog_events: MessageReader<npc::DialogueMessage>,
 ) {
     let Some(network) = network else {
         return;
     };
 
     for dialog in dialog_events.read() {
-        let message = ServerMessage::DialogEvent(interaction::to_dialog_event(dialog));
+        let message = ServerMessage::DialogueResponse(npc::to_dialogue_response(dialog));
         let Ok(payload) = encode_server_message(&message) else {
             continue;
         };
         for (&address, session) in &network.sessions {
             if session.logged_in && session.player_id == Some(dialog.player_id) {
+                let _ = network.socket.send_to(&payload, address);
+            }
+        }
+    }
+}
+
+pub fn broadcast_quest_events(
+    network: Option<Res<ServerNetwork>>,
+    mut quest_events: MessageReader<quest::QuestUpdatedMessage>,
+) {
+    let Some(network) = network else {
+        return;
+    };
+
+    for changed in quest_events.read() {
+        let message = ServerMessage::QuestUpdateEvent(shared::protocol::QuestUpdateEvent {
+            player_id: changed.player_id,
+            quest_id: changed.quest_id,
+            status: changed.status.clone(),
+        });
+        let Ok(payload) = encode_server_message(&message) else {
+            continue;
+        };
+        for (&address, session) in &network.sessions {
+            if session.logged_in && session.player_id == Some(changed.player_id) {
                 let _ = network.socket.send_to(&payload, address);
             }
         }

@@ -31,6 +31,9 @@ fn main() {
         .add_message::<systems::interaction::InteractRequest>()
         .add_message::<systems::interaction::DialogMessage>()
         .add_message::<systems::interaction::MapChangedMessage>()
+        .add_message::<systems::npc::NpcInteractRequest>()
+        .add_message::<systems::npc::DialogueMessage>()
+        .add_message::<systems::quest::QuestUpdatedMessage>()
         .add_message::<systems::chat::ChatRequest>()
         .add_message::<systems::chat::ChatDelivery>()
         .add_message::<systems::movement::MoveRequest>()
@@ -63,7 +66,10 @@ fn main() {
                 systems::item::use_item_system,
                 systems::interaction::interaction_system,
                 systems::interaction::portal_system,
+                systems::npc::convert_legacy_dialog_to_npc,
+                systems::npc::npc_dialogue_system,
                 systems::chat::chat_system,
+                systems::quest::track_enemy_kill_quest_system,
             )
                 .chain(),
         )
@@ -89,6 +95,7 @@ fn main() {
                 network::broadcast_equipment_events,
                 network::broadcast_dialog_events,
                 network::broadcast_chat_events,
+                network::broadcast_quest_events,
                 network::broadcast_status_effect_events,
                 db::periodic_save_players,
             )

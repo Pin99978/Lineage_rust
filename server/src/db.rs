@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use rusqlite::{params, Connection};
-use shared::{EquipmentMap, Inventory};
+use shared::{EquipmentMap, Inventory, QuestTracker};
 use std::collections::HashMap;
 use std::thread;
 use std::time::Duration;
@@ -21,6 +21,7 @@ pub struct PersistedPlayer {
     pub mana_max: i32,
     pub inventory: Inventory,
     pub equipment: EquipmentMap,
+    pub quests: QuestTracker,
 }
 
 #[derive(Debug)]
@@ -98,6 +99,12 @@ fn db_worker_loop(command_rx: Receiver<DbCommand>, result_tx: Sender<DbResult>) 
             inventory_json TEXT NOT NULL,
             equipment_json TEXT NOT NULL DEFAULT '{"weapon":null,"armor":null}'
         );
+        CREATE TABLE IF NOT EXISTS quests (
+            username TEXT NOT NULL,
+            quest_id TEXT NOT NULL,
+            status_json TEXT NOT NULL,
+            PRIMARY KEY(username, quest_id)
+        );
         "#,
     ) {
         error!("database migration failed: {}", error);
@@ -152,6 +159,7 @@ fn db_worker_loop(command_rx: Receiver<DbCommand>, result_tx: Sender<DbResult>) 
                     mana_max: 60,
                     inventory: Inventory::default(),
                     equipment: EquipmentMap::default(),
+                    quests: QuestTracker::default(),
                 };
                 if let Err(error) = save_player(&conn, &new_player) {
                     let _ = result_tx.send(DbResult::LoginFailed {
@@ -228,6 +236,7 @@ fn load_player(conn: &Connection, username: &str) -> Option<PersistedPlayer> {
     let inventory_items: HashMap<shared::ItemType, u32> =
         serde_json::from_str(&row.6).unwrap_or_default();
     let equipment = serde_json::from_str(&row.7).unwrap_or_default();
+    let quests = load_quests(conn, username);
     Some(PersistedPlayer {
         username: username.to_string(),
         x: row.0,
@@ -240,6 +249,7 @@ fn load_player(conn: &Connection, username: &str) -> Option<PersistedPlayer> {
             items: inventory_items,
         },
         equipment,
+        quests,
     })
 }
 
@@ -285,6 +295,57 @@ fn save_player(conn: &Connection, data: &PersistedPlayer) -> Result<(), String> 
         ],
     )
     .map_err(|error| format!("save player failed: {}", error))?;
+    save_quests(conn, &data.username, &data.quests)?;
+    Ok(())
+}
+
+fn load_quests(conn: &Connection, username: &str) -> QuestTracker {
+    let mut statement =
+        match conn.prepare("SELECT quest_id, status_json FROM quests WHERE username = ?1") {
+            Ok(stmt) => stmt,
+            Err(_) => return QuestTracker::default(),
+        };
+
+    let rows = match statement.query_map(params![username], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }) {
+        Ok(rows) => rows,
+        Err(_) => return QuestTracker::default(),
+    };
+
+    let mut tracker = QuestTracker::default();
+    for row in rows.flatten() {
+        let quest_id = match row.0.as_str() {
+            "KillSlimes" => shared::QuestId::KillSlimes,
+            _ => continue,
+        };
+        let status = serde_json::from_str::<shared::QuestStatus>(&row.1)
+            .unwrap_or(shared::QuestStatus::NotStarted);
+        tracker.active_quests.push(shared::QuestEntry {
+            id: quest_id,
+            status,
+        });
+    }
+    tracker
+}
+
+fn save_quests(conn: &Connection, username: &str, tracker: &QuestTracker) -> Result<(), String> {
+    conn.execute("DELETE FROM quests WHERE username = ?1", params![username])
+        .map_err(|error| format!("clear quests failed: {}", error))?;
+
+    for entry in &tracker.active_quests {
+        let quest_id = match entry.id {
+            shared::QuestId::KillSlimes => "KillSlimes",
+        };
+        let status_json = serde_json::to_string(&entry.status)
+            .map_err(|error| format!("serialize quest status failed: {}", error))?;
+        conn.execute(
+            "INSERT INTO quests (username, quest_id, status_json) VALUES (?1, ?2, ?3)",
+            params![username, quest_id, status_json],
+        )
+        .map_err(|error| format!("insert quest failed: {}", error))?;
+    }
+
     Ok(())
 }
 
@@ -300,6 +361,7 @@ pub fn periodic_save_players(
         &shared::Mana,
         &Inventory,
         &EquipmentMap,
+        &QuestTracker,
     )>,
 ) {
     let Some(mut save_tick) = save_tick else {
@@ -323,7 +385,7 @@ pub fn periodic_save_players(
         else {
             continue;
         };
-        let Ok((_network_entity, position, health, mana, inventory, equipment)) =
+        let Ok((_network_entity, position, health, mana, inventory, equipment, quests)) =
             players.get(entity)
         else {
             continue;
@@ -338,6 +400,7 @@ pub fn periodic_save_players(
             mana_max: mana.max,
             inventory: inventory.clone(),
             equipment: equipment.clone(),
+            quests: quests.clone(),
         };
         let _ = db_bridge.command_tx.send(DbCommand::SavePlayer { data });
     }
@@ -354,6 +417,7 @@ pub fn save_player_progress_on_change(
             &shared::Mana,
             &Inventory,
             &EquipmentMap,
+            &QuestTracker,
         ),
         Or<(
             Changed<shared::Position>,
@@ -361,6 +425,7 @@ pub fn save_player_progress_on_change(
             Changed<shared::Mana>,
             Changed<Inventory>,
             Changed<EquipmentMap>,
+            Changed<QuestTracker>,
         )>,
     >,
 ) {
@@ -377,7 +442,7 @@ pub fn save_player_progress_on_change(
         else {
             continue;
         };
-        let Ok((position, health, mana, inventory, equipment)) = players.get(entity) else {
+        let Ok((position, health, mana, inventory, equipment, quests)) = players.get(entity) else {
             continue;
         };
         let _ = db_bridge.command_tx.send(DbCommand::SavePlayer {
@@ -391,6 +456,7 @@ pub fn save_player_progress_on_change(
                 mana_max: mana.max,
                 inventory: inventory.clone(),
                 equipment: equipment.clone(),
+                quests: quests.clone(),
             },
         });
     }

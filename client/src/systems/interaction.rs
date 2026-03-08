@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use shared::protocol::{AttackIntent, InteractIntent, LootIntent, MoveIntent};
+use shared::protocol::{AttackIntent, InteractNpcIntent, LootIntent, MoveIntent};
 use shared::Health;
 
 use crate::{network, systems::animation};
@@ -67,7 +67,13 @@ pub fn capture_click_intent(
         .find(|(transform, _)| transform.translation.truncate().distance(world_position) <= 26.0)
         .map(|(_, visual)| visual.id)
     {
-        network::send_interact_intent(&network, InteractIntent { target_id });
+        network::send_interact_npc_intent(
+            &network,
+            InteractNpcIntent {
+                target_id,
+                choice_index: None,
+            },
+        );
         return;
     }
 

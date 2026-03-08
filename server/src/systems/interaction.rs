@@ -110,10 +110,3 @@ pub fn portal_system(
         });
     }
 }
-
-pub fn to_dialog_event(message: &DialogMessage) -> shared::protocol::DialogEvent {
-    shared::protocol::DialogEvent {
-        player_id: message.player_id,
-        text: message.text.clone(),
-    }
-}

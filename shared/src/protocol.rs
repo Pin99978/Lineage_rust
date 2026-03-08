@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{EquipmentMap, EquipmentSlot, ItemType, SpellType, StatusEffect};
+use crate::{EquipmentMap, EquipmentSlot, ItemType, QuestId, QuestStatus, SpellType, StatusEffect};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ClientMessage {
@@ -12,6 +12,7 @@ pub enum ClientMessage {
     EquipIntent(EquipIntent),
     UnequipIntent(UnequipIntent),
     InteractIntent(InteractIntent),
+    InteractNpcIntent(InteractNpcIntent),
     ChatIntent(ChatIntent),
     UseItemIntent(UseItemIntent),
 }
@@ -58,6 +59,12 @@ pub struct InteractIntent {
     pub target_id: u64,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct InteractNpcIntent {
+    pub target_id: u64,
+    pub choice_index: Option<u8>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChatChannel {
     Say,
@@ -92,7 +99,9 @@ pub enum ServerMessage {
     EquipmentUpdate(EquipmentUpdate),
     HealEvent(HealEvent),
     DialogEvent(DialogEvent),
+    DialogueResponse(DialogueResponse),
     ChatEvent(ChatEvent),
+    QuestUpdateEvent(QuestUpdateEvent),
     StatusEffectUpdate(StatusEffectUpdate),
 }
 
@@ -107,6 +116,7 @@ pub enum NetworkEntityKind {
     Player,
     Enemy,
     NpcMerchant,
+    Portal,
     LootGold,
     LootHealthPotion,
 }
@@ -190,10 +200,25 @@ pub struct DialogEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DialogueResponse {
+    pub player_id: u64,
+    pub npc_id: u64,
+    pub text: String,
+    pub choices: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatEvent {
     pub sender: String,
     pub channel: ChatChannel,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuestUpdateEvent {
+    pub player_id: u64,
+    pub quest_id: QuestId,
+    pub status: QuestStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

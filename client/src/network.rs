@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use shared::protocol::{
     decode_server_message, encode_client_message, AttackIntent, CastSpellIntent, ChatIntent,
-    ClientMessage, EntityState, EquipIntent, InteractIntent, LoginRequest, LootIntent,
+    ClientMessage, EntityState, EquipIntent, InteractNpcIntent, LoginRequest, LootIntent,
     NetworkEntityKind, ServerMessage, UnequipIntent, UseItemIntent,
 };
 use shared::{EquipmentSlot, Health, ItemType, Position, SpellType, MAP_TOWN};
@@ -94,8 +94,8 @@ pub fn send_unequip_intent(network: &ClientNetwork, intent: UnequipIntent) {
     send_to_server(network, &ClientMessage::UnequipIntent(intent));
 }
 
-pub fn send_interact_intent(network: &ClientNetwork, intent: InteractIntent) {
-    send_to_server(network, &ClientMessage::InteractIntent(intent));
+pub fn send_interact_npc_intent(network: &ClientNetwork, intent: InteractNpcIntent) {
+    send_to_server(network, &ClientMessage::InteractNpcIntent(intent));
 }
 
 pub fn send_chat_intent(network: &ClientNetwork, intent: ChatIntent) {
@@ -197,9 +197,15 @@ pub fn receive_server_state(
             }
             ServerMessage::AssignedPlayer { player_id } => {
                 local_player.id = Some(player_id);
+                local_player.map_id = MAP_TOWN.to_string();
                 inventory_state.items.clear();
                 equipment_state.weapon = None;
                 equipment_state.armor = None;
+                hud_state.quest_entries.clear();
+                dialog_state.visible = false;
+                dialog_state.text.clear();
+                dialog_state.choices.clear();
+                dialog_state.npc_id = None;
                 let mut player_query = state_queries.p0();
                 let Ok((player_entity, _, _, _)) = player_query.single_mut() else {
                     continue;
@@ -309,6 +315,17 @@ pub fn receive_server_state(
             ServerMessage::DialogEvent(event) => {
                 if local_player.id == Some(event.player_id) {
                     dialog_state.text = event.text;
+                    dialog_state.choices.clear();
+                    dialog_state.npc_id = None;
+                    dialog_state.visible = true;
+                    dialog_state.timer.reset();
+                }
+            }
+            ServerMessage::DialogueResponse(event) => {
+                if local_player.id == Some(event.player_id) {
+                    dialog_state.text = event.text;
+                    dialog_state.choices = event.choices;
+                    dialog_state.npc_id = Some(event.npc_id);
                     dialog_state.visible = true;
                     dialog_state.timer.reset();
                 }
@@ -327,6 +344,20 @@ pub fn receive_server_state(
             ServerMessage::StatusEffectUpdate(event) => {
                 if local_player.id == Some(event.player_id) {
                     hud_state.status_effects = event.effects;
+                }
+            }
+            ServerMessage::QuestUpdateEvent(event) => {
+                if local_player.id == Some(event.player_id) {
+                    let next_status = event.status.clone();
+                    if let Some((_, status)) = hud_state
+                        .quest_entries
+                        .iter_mut()
+                        .find(|(quest_id, _)| *quest_id == event.quest_id)
+                    {
+                        *status = next_status;
+                    } else {
+                        hud_state.quest_entries.push((event.quest_id, next_status));
+                    }
                 }
             }
         }

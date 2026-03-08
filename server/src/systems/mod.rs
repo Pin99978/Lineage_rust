@@ -7,5 +7,7 @@ pub mod interaction;
 pub mod item;
 pub mod loot;
 pub mod movement;
+pub mod npc;
+pub mod quest;
 pub mod spawner;
 pub mod spell;

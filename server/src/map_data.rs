@@ -200,19 +200,29 @@ pub fn setup_world_map(mut commands: Commands, network: Option<ResMut<network::S
     }
 
     // Two-way portals between Town and Dungeon1.
+    let town_portal_id = network.allocate_entity_id();
     commands.spawn((
+        network::NetworkEntity {
+            id: town_portal_id,
+            kind: shared::protocol::NetworkEntityKind::Portal,
+        },
         MapId(MAP_TOWN.to_string()),
-        Position { x: 420.0, y: 0.0 },
+        Position { x: -250.0, y: 0.0 },
         Portal {
             target_map: MAP_DUNGEON_1.to_string(),
-            target_x: -360.0,
+            target_x: -300.0,
             target_y: 0.0,
             trigger_radius: 28.0,
         },
     ));
+    let dungeon_portal_id = network.allocate_entity_id();
     commands.spawn((
+        network::NetworkEntity {
+            id: dungeon_portal_id,
+            kind: shared::protocol::NetworkEntityKind::Portal,
+        },
         MapId(MAP_DUNGEON_1.to_string()),
-        Position { x: -420.0, y: 0.0 },
+        Position { x: -350.0, y: 0.0 },
         Portal {
             target_map: MAP_TOWN.to_string(),
             target_x: -300.0,

@@ -57,6 +57,7 @@ pub fn color_for_network_kind(kind: NetworkEntityKind) -> Color {
         NetworkEntityKind::Player => Color::srgb(0.1, 0.6, 1.0),
         NetworkEntityKind::Enemy => Color::srgb(0.85, 0.25, 0.2),
         NetworkEntityKind::NpcMerchant => Color::srgb(0.2, 0.85, 0.3),
+        NetworkEntityKind::Portal => Color::srgb(0.55, 0.15, 0.95),
         NetworkEntityKind::LootGold => Color::srgb(0.95, 0.82, 0.2),
         NetworkEntityKind::LootHealthPotion => Color::srgb(0.82, 0.12, 0.12),
     }

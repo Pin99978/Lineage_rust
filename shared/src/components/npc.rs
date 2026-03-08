@@ -6,6 +6,13 @@ pub enum NpcType {
     Merchant,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect, Serialize, Deserialize)]
+pub enum DialogueChoiceKind {
+    AcceptQuestKillSlimes,
+    TurnInQuestKillSlimes,
+    Leave,
+}
+
 #[derive(Component, Debug, Clone, Reflect, Serialize, Deserialize)]
 #[reflect(Component)]
 pub struct Npc {
