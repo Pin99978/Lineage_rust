@@ -70,6 +70,8 @@ fn main() {
                     .run_if(in_state(systems::ui::AppState::InGame)),
                 systems::ui::paperdoll::toggle_paperdoll_window_system
                     .run_if(in_state(systems::ui::AppState::InGame)),
+                systems::ui::guild::toggle_guild_window_system
+                    .run_if(in_state(systems::ui::AppState::InGame)),
                 systems::interaction::capture_click_intent
                     .run_if(in_state(systems::ui::AppState::InGame)),
                 systems::input::capture_movement_intent
@@ -102,8 +104,10 @@ fn main() {
             (
                 systems::ui::inventory::apply_inventory_visibility_system,
                 systems::ui::paperdoll::apply_paperdoll_visibility_system,
+                systems::ui::guild::apply_guild_visibility_system,
                 systems::ui::inventory::refresh_inventory_ui_system,
                 systems::ui::paperdoll::refresh_paperdoll_ui_system,
+                systems::ui::guild::refresh_guild_ui_system,
                 systems::ui::inventory::inventory_click_equip_system,
                 systems::ui::paperdoll::paperdoll_click_unequip_system,
                 systems::ui::quest_log::update_quest_log_ui,

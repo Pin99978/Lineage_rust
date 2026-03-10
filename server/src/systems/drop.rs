@@ -58,6 +58,9 @@ pub fn item_drop_system(
                 ItemType::HealthPotion => NetworkEntityKind::LootHealthPotion,
                 ItemType::BronzeSword => NetworkEntityKind::LootGold,
                 ItemType::LeatherArmor => NetworkEntityKind::LootHealthPotion,
+                ItemType::ScrollLightning => NetworkEntityKind::LootHealthPotion,
+                ItemType::ScrollPoisonArrow => NetworkEntityKind::LootHealthPotion,
+                ItemType::ScrollBless => NetworkEntityKind::LootHealthPotion,
             };
 
             commands.spawn((

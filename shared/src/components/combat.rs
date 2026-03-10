@@ -69,6 +69,9 @@ pub enum SpellType {
     #[default]
     Fireball,
     Heal,
+    Lightning,
+    PoisonArrow,
+    Bless,
 }
 
 #[derive(
@@ -131,7 +134,7 @@ pub fn class_def(class: CharacterClass) -> ClassDef {
             base_mp: 36,
             hp_growth_mult: 1.0,
             mp_growth_mult: 0.5,
-            can_cast: vec![SpellType::Heal],
+            can_cast: vec![SpellType::Fireball, SpellType::Heal, SpellType::Bless],
         },
         CharacterClass::Knight => ClassDef {
             base_str: 16,
@@ -153,7 +156,7 @@ pub fn class_def(class: CharacterClass) -> ClassDef {
             base_mp: 48,
             hp_growth_mult: 0.8,
             mp_growth_mult: 1.2,
-            can_cast: vec![SpellType::Heal],
+            can_cast: vec![SpellType::Heal, SpellType::PoisonArrow, SpellType::Bless],
         },
         CharacterClass::Wizard => ClassDef {
             base_str: 8,
@@ -164,7 +167,12 @@ pub fn class_def(class: CharacterClass) -> ClassDef {
             base_mp: 70,
             hp_growth_mult: 0.6,
             mp_growth_mult: 1.5,
-            can_cast: vec![SpellType::Fireball, SpellType::Heal],
+            can_cast: vec![
+                SpellType::Fireball,
+                SpellType::Heal,
+                SpellType::Lightning,
+                SpellType::PoisonArrow,
+            ],
         },
         CharacterClass::DarkElf => ClassDef {
             base_str: 12,
@@ -175,7 +183,11 @@ pub fn class_def(class: CharacterClass) -> ClassDef {
             base_mp: 34,
             hp_growth_mult: 0.9,
             mp_growth_mult: 0.8,
-            can_cast: vec![SpellType::Fireball],
+            can_cast: vec![
+                SpellType::Fireball,
+                SpellType::Lightning,
+                SpellType::PoisonArrow,
+            ],
         },
     }
 }
@@ -205,6 +217,27 @@ pub fn spell_def(spell: SpellType) -> SpellDef {
             power: 26,
             cooldown_secs: 2.0,
         },
+        SpellType::Lightning => SpellDef {
+            req_level: 5,
+            mana_cost: 30,
+            range: 250.0,
+            power: 55,
+            cooldown_secs: 3.0,
+        },
+        SpellType::PoisonArrow => SpellDef {
+            req_level: 3,
+            mana_cost: 20,
+            range: 250.0,
+            power: 15,
+            cooldown_secs: 2.0,
+        },
+        SpellType::Bless => SpellDef {
+            req_level: 5,
+            mana_cost: 25,
+            range: 0.0,
+            power: 10,
+            cooldown_secs: 30.0,
+        },
     }
 }
 
@@ -213,6 +246,9 @@ pub fn spell_def(spell: SpellType) -> SpellDef {
 pub struct SpellCooldowns {
     pub fireball: f32,
     pub heal: f32,
+    pub lightning: f32,
+    pub poison_arrow: f32,
+    pub bless: f32,
 }
 
 impl Default for SpellCooldowns {
@@ -220,7 +256,30 @@ impl Default for SpellCooldowns {
         Self {
             fireball: 0.0,
             heal: 0.0,
+            lightning: 0.0,
+            poison_arrow: 0.0,
+            bless: 0.0,
         }
+    }
+}
+
+#[derive(Component, Default, Debug, Clone, Reflect, Serialize, Deserialize)]
+#[reflect(Component, Default)]
+pub struct KnownSpells {
+    pub spells: Vec<SpellType>,
+}
+
+impl KnownSpells {
+    pub fn knows(&self, spell: SpellType) -> bool {
+        self.spells.contains(&spell)
+    }
+
+    pub fn learn(&mut self, spell: SpellType) -> bool {
+        if self.knows(spell) {
+            return false;
+        }
+        self.spells.push(spell);
+        true
     }
 }
 

@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use shared::{item_slot, ItemType};
+use shared::{item_slot, scroll_spell, ItemType};
 use std::collections::HashMap;
 
 use crate::network;
@@ -13,11 +13,12 @@ pub struct LocalInventoryState {
 pub struct UiWindowsState {
     pub inventory_open: bool,
     pub paperdoll_open: bool,
+    pub guild_open: bool,
 }
 
 impl UiWindowsState {
     pub fn blocks_world_input(&self) -> bool {
-        self.inventory_open || self.paperdoll_open
+        self.inventory_open || self.paperdoll_open || self.guild_open
     }
 }
 
@@ -65,6 +66,9 @@ pub fn setup_inventory_ui(commands: &mut Commands) {
             ItemType::BronzeSword,
             ItemType::LeatherArmor,
             ItemType::HealthPotion,
+            ItemType::ScrollLightning,
+            ItemType::ScrollPoisonArrow,
+            ItemType::ScrollBless,
             ItemType::Gold,
         ] {
             parent
@@ -95,8 +99,16 @@ pub fn setup_inventory_ui(commands: &mut Commands) {
 
 pub fn toggle_inventory_window_system(
     keyboard: Res<ButtonInput<KeyCode>>,
+    chat_state: Option<Res<super::chat::ChatUiState>>,
     windows_state: Option<ResMut<UiWindowsState>>,
 ) {
+    if chat_state
+        .as_ref()
+        .map(|state| state.focused)
+        .unwrap_or(false)
+    {
+        return;
+    }
     if !keyboard.just_pressed(KeyCode::KeyI) {
         return;
     }
@@ -143,8 +155,12 @@ pub fn refresh_inventory_ui_system(
         let item_name = format!("{:?}", marker.item_type);
         let action_hint = if item_slot(marker.item_type).is_some() {
             "Click to Equip"
+        } else if marker.item_type == ItemType::HealthPotion
+            || scroll_spell(marker.item_type).is_some()
+        {
+            "Click to Use"
         } else {
-            "Not Equipable"
+            "Not Usable"
         };
         *text = Text::new(format!("{} x{}  [{}]", item_name, count, action_hint));
     }
@@ -177,9 +193,17 @@ pub fn inventory_click_equip_system(
         if *interaction != Interaction::Pressed {
             continue;
         }
-        if item_slot(button.item_type).is_none() {
-            continue;
+        if item_slot(button.item_type).is_some() {
+            network::equip_item_by_hotkey(&network, button.item_type);
+        } else if button.item_type == ItemType::HealthPotion
+            || scroll_spell(button.item_type).is_some()
+        {
+            network::send_use_item_intent(
+                &network,
+                shared::protocol::UseItemIntent {
+                    item_type: button.item_type,
+                },
+            );
         }
-        network::equip_item_by_hotkey(&network, button.item_type);
     }
 }

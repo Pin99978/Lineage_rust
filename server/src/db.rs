@@ -2,7 +2,8 @@ use bevy::prelude::*;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use rusqlite::{params, Connection};
 use shared::{
-    class_def, BaseStats, CharacterClass, EquipmentMap, Experience, Inventory, Level, QuestTracker,
+    class_def, BaseStats, CharacterClass, EquipmentMap, Experience, GuildMembership, GuildRole,
+    Inventory, KnownSpells, Level, QuestTracker, SpellType,
 };
 use std::collections::HashMap;
 use std::thread;
@@ -16,6 +17,9 @@ const DB_PATH: &str = "data.db";
 pub struct PersistedPlayer {
     pub username: String,
     pub class: CharacterClass,
+    pub guild_name: Option<String>,
+    pub guild_role: Option<GuildRole>,
+    pub known_spells: KnownSpells,
     pub x: f32,
     pub y: f32,
     pub health_current: i32,
@@ -41,6 +45,24 @@ pub enum DbCommand {
     SavePlayer {
         data: PersistedPlayer,
     },
+    CreateGuild {
+        username: String,
+        guild_name: String,
+    },
+    JoinGuild {
+        username: String,
+        guild_name: String,
+        role: GuildRole,
+    },
+    LeaveGuild {
+        username: String,
+    },
+    DisbandGuild {
+        username: String,
+    },
+    QueryGuildMembers {
+        username: String,
+    },
 }
 
 #[derive(Debug)]
@@ -54,6 +76,32 @@ pub enum DbResult {
         message: String,
     },
     SaveError {
+        username: String,
+        message: String,
+    },
+    GuildCreated {
+        username: String,
+        guild_name: String,
+        role: GuildRole,
+    },
+    GuildJoined {
+        username: String,
+        guild_name: String,
+        role: GuildRole,
+    },
+    GuildLeft {
+        username: String,
+    },
+    GuildDisbanded {
+        username: String,
+        guild_name: String,
+    },
+    GuildMembers {
+        username: String,
+        guild_name: Option<String>,
+        members: Vec<String>,
+    },
+    GuildOpError {
         username: String,
         message: String,
     },
@@ -113,13 +161,24 @@ fn db_worker_loop(command_rx: Receiver<DbCommand>, result_tx: Sender<DbResult>) 
             con INTEGER NOT NULL DEFAULT 15,
             class TEXT NOT NULL DEFAULT 'Knight',
             inventory_json TEXT NOT NULL,
-            equipment_json TEXT NOT NULL DEFAULT '{"weapon":null,"armor":null}'
+            equipment_json TEXT NOT NULL DEFAULT '{"weapon":null,"armor":null}',
+            known_spells_json TEXT NOT NULL DEFAULT '[]'
         );
         CREATE TABLE IF NOT EXISTS quests (
             username TEXT NOT NULL,
             quest_id TEXT NOT NULL,
             status_json TEXT NOT NULL,
             PRIMARY KEY(username, quest_id)
+        );
+        CREATE TABLE IF NOT EXISTS guilds (
+            name TEXT PRIMARY KEY,
+            leader_username TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS guild_members (
+            guild_name TEXT NOT NULL,
+            username TEXT NOT NULL,
+            role TEXT NOT NULL,
+            PRIMARY KEY(guild_name, username)
         );
         "#,
     ) {
@@ -192,6 +251,33 @@ fn db_worker_loop(command_rx: Receiver<DbCommand>, result_tx: Sender<DbResult>) 
     if let Err(error) = ensure_column(
         &conn,
         "users",
+        "guild_name",
+        "ALTER TABLE users ADD COLUMN guild_name TEXT",
+    ) {
+        error!("database migration failed: {}", error);
+        return;
+    }
+    if let Err(error) = ensure_column(
+        &conn,
+        "users",
+        "guild_role",
+        "ALTER TABLE users ADD COLUMN guild_role TEXT",
+    ) {
+        error!("database migration failed: {}", error);
+        return;
+    }
+    if let Err(error) = ensure_column(
+        &conn,
+        "users",
+        "known_spells_json",
+        "ALTER TABLE users ADD COLUMN known_spells_json TEXT NOT NULL DEFAULT '[]'",
+    ) {
+        error!("database migration failed: {}", error);
+        return;
+    }
+    if let Err(error) = ensure_column(
+        &conn,
+        "users",
         "str_stat",
         "ALTER TABLE users ADD COLUMN str_stat INTEGER NOT NULL DEFAULT 15",
     ) {
@@ -245,6 +331,9 @@ fn db_worker_loop(command_rx: Receiver<DbCommand>, result_tx: Sender<DbResult>) 
                 let new_player = PersistedPlayer {
                     username: username.clone(),
                     class,
+                    guild_name: None,
+                    guild_role: None,
+                    known_spells: initial_known_spells_for_class(class),
                     x: -300.0,
                     y: 0.0,
                     health_current: definition.base_hp,
@@ -284,6 +373,64 @@ fn db_worker_loop(command_rx: Receiver<DbCommand>, result_tx: Sender<DbResult>) 
                     });
                 }
             }
+            DbCommand::CreateGuild {
+                username,
+                guild_name,
+            } => match create_guild(&conn, &username, &guild_name) {
+                Ok(()) => {
+                    let _ = result_tx.send(DbResult::GuildCreated {
+                        username,
+                        guild_name,
+                        role: GuildRole::Leader,
+                    });
+                }
+                Err(message) => {
+                    let _ = result_tx.send(DbResult::GuildOpError { username, message });
+                }
+            },
+            DbCommand::JoinGuild {
+                username,
+                guild_name,
+                role,
+            } => match join_guild(&conn, &username, &guild_name, role) {
+                Ok(()) => {
+                    let _ = result_tx.send(DbResult::GuildJoined {
+                        username,
+                        guild_name,
+                        role,
+                    });
+                }
+                Err(message) => {
+                    let _ = result_tx.send(DbResult::GuildOpError { username, message });
+                }
+            },
+            DbCommand::LeaveGuild { username } => match leave_guild(&conn, &username) {
+                Ok(_) => {
+                    let _ = result_tx.send(DbResult::GuildLeft { username });
+                }
+                Err(message) => {
+                    let _ = result_tx.send(DbResult::GuildOpError { username, message });
+                }
+            },
+            DbCommand::DisbandGuild { username } => match disband_guild(&conn, &username) {
+                Ok(guild_name) => {
+                    let _ = result_tx.send(DbResult::GuildDisbanded {
+                        username,
+                        guild_name,
+                    });
+                }
+                Err(message) => {
+                    let _ = result_tx.send(DbResult::GuildOpError { username, message });
+                }
+            },
+            DbCommand::QueryGuildMembers { username } => {
+                let (guild_name, members) = query_guild_members(&conn, &username);
+                let _ = result_tx.send(DbResult::GuildMembers {
+                    username,
+                    guild_name,
+                    members,
+                });
+            }
         }
 
         thread::sleep(Duration::from_millis(1));
@@ -315,10 +462,21 @@ fn ensure_column(
     Ok(())
 }
 
+fn initial_known_spells_for_class(class: CharacterClass) -> KnownSpells {
+    let spells = match class {
+        CharacterClass::Knight => Vec::new(),
+        CharacterClass::Wizard | CharacterClass::Prince | CharacterClass::DarkElf => {
+            vec![SpellType::Fireball]
+        }
+        CharacterClass::Elf => vec![SpellType::Heal],
+    };
+    KnownSpells { spells }
+}
+
 fn load_player(conn: &Connection, username: &str) -> Option<PersistedPlayer> {
     let mut statement = conn
         .prepare(
-            "SELECT x, y, health_current, health_max, mana_current, mana_max, level, exp_current, exp_next, str_stat, dex, int_stat, con, class, inventory_json, equipment_json FROM users WHERE username = ?1",
+            "SELECT x, y, health_current, health_max, mana_current, mana_max, level, exp_current, exp_next, str_stat, dex, int_stat, con, class, guild_name, guild_role, inventory_json, equipment_json, known_spells_json FROM users WHERE username = ?1",
         )
         .ok()?;
     let row = statement
@@ -338,19 +496,28 @@ fn load_player(conn: &Connection, username: &str) -> Option<PersistedPlayer> {
                 row.get::<_, u32>(11)?,
                 row.get::<_, u32>(12)?,
                 row.get::<_, String>(13)?,
-                row.get::<_, String>(14)?,
-                row.get::<_, String>(15)?,
+                row.get::<_, Option<String>>(14)?,
+                row.get::<_, Option<String>>(15)?,
+                row.get::<_, String>(16)?,
+                row.get::<_, String>(17)?,
+                row.get::<_, String>(18)?,
             ))
         })
         .ok()?;
 
     let inventory_items: HashMap<shared::ItemType, u32> =
-        serde_json::from_str(&row.14).unwrap_or_default();
-    let equipment = serde_json::from_str(&row.15).unwrap_or_default();
+        serde_json::from_str(&row.16).unwrap_or_default();
+    let equipment = serde_json::from_str(&row.17).unwrap_or_default();
+    let known_spells = KnownSpells {
+        spells: serde_json::from_str(&row.18).unwrap_or_default(),
+    };
     let quests = load_quests(conn, username);
     Some(PersistedPlayer {
         username: username.to_string(),
         class: CharacterClass::from_str(&row.13).unwrap_or_default(),
+        guild_name: row.14.clone(),
+        guild_role: row.15.as_deref().and_then(GuildRole::from_str),
+        known_spells,
         x: row.0,
         y: row.1,
         health_current: row.2,
@@ -379,6 +546,8 @@ fn save_player(conn: &Connection, data: &PersistedPlayer) -> Result<(), String> 
         .map_err(|error| format!("serialize inventory failed: {}", error))?;
     let equipment_json = serde_json::to_string(&data.equipment)
         .map_err(|error| format!("serialize equipment failed: {}", error))?;
+    let known_spells_json = serde_json::to_string(&data.known_spells.spells)
+        .map_err(|error| format!("serialize known spells failed: {}", error))?;
     conn.execute(
         r#"
         INSERT INTO users (
@@ -397,10 +566,13 @@ fn save_player(conn: &Connection, data: &PersistedPlayer) -> Result<(), String> 
             int_stat,
             con,
             class,
+            guild_name,
+            guild_role,
             inventory_json,
-            equipment_json
+            equipment_json,
+            known_spells_json
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
         ON CONFLICT(username) DO UPDATE SET
             x = excluded.x,
             y = excluded.y,
@@ -416,8 +588,11 @@ fn save_player(conn: &Connection, data: &PersistedPlayer) -> Result<(), String> 
             int_stat = excluded.int_stat,
             con = excluded.con,
             class = excluded.class,
+            guild_name = excluded.guild_name,
+            guild_role = excluded.guild_role,
             inventory_json = excluded.inventory_json,
-            equipment_json = excluded.equipment_json
+            equipment_json = excluded.equipment_json,
+            known_spells_json = excluded.known_spells_json
         "#,
         params![
             data.username,
@@ -435,8 +610,11 @@ fn save_player(conn: &Connection, data: &PersistedPlayer) -> Result<(), String> 
             data.base_stats.int_stat,
             data.base_stats.con,
             data.class.as_str(),
+            data.guild_name.clone(),
+            data.guild_role.map(|role| role.as_str().to_string()),
             inventory_json,
-            equipment_json
+            equipment_json,
+            known_spells_json
         ],
     )
     .map_err(|error| format!("save player failed: {}", error))?;
@@ -494,6 +672,187 @@ fn save_quests(conn: &Connection, username: &str, tracker: &QuestTracker) -> Res
     Ok(())
 }
 
+fn create_guild(conn: &Connection, username: &str, guild_name: &str) -> Result<(), String> {
+    let guild_name = guild_name.trim();
+    if guild_name.len() < 3 || guild_name.len() > 24 {
+        return Err("guild name must be 3-24 chars".to_string());
+    }
+
+    let already_in_guild = conn
+        .query_row(
+            "SELECT guild_name FROM users WHERE username = ?1",
+            params![username],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .map_err(|error| format!("query player guild failed: {}", error))?;
+    if already_in_guild.is_some() {
+        return Err("already in a guild".to_string());
+    }
+
+    let exists = conn
+        .query_row(
+            "SELECT 1 FROM guilds WHERE name = ?1",
+            params![guild_name],
+            |row| row.get::<_, i32>(0),
+        )
+        .ok()
+        .is_some();
+    if exists {
+        return Err("guild name already exists".to_string());
+    }
+
+    conn.execute(
+        "INSERT INTO guilds (name, leader_username) VALUES (?1, ?2)",
+        params![guild_name, username],
+    )
+    .map_err(|error| format!("create guild failed: {}", error))?;
+    conn.execute(
+        "INSERT OR REPLACE INTO guild_members (guild_name, username, role) VALUES (?1, ?2, ?3)",
+        params![guild_name, username, GuildRole::Leader.as_str()],
+    )
+    .map_err(|error| format!("insert guild member failed: {}", error))?;
+    conn.execute(
+        "UPDATE users SET guild_name = ?1, guild_role = ?2 WHERE username = ?3",
+        params![guild_name, GuildRole::Leader.as_str(), username],
+    )
+    .map_err(|error| format!("update user guild failed: {}", error))?;
+    Ok(())
+}
+
+fn join_guild(
+    conn: &Connection,
+    username: &str,
+    guild_name: &str,
+    role: GuildRole,
+) -> Result<(), String> {
+    let exists = conn
+        .query_row(
+            "SELECT 1 FROM guilds WHERE name = ?1",
+            params![guild_name],
+            |row| row.get::<_, i32>(0),
+        )
+        .ok()
+        .is_some();
+    if !exists {
+        return Err("guild does not exist".to_string());
+    }
+
+    conn.execute(
+        "INSERT OR REPLACE INTO guild_members (guild_name, username, role) VALUES (?1, ?2, ?3)",
+        params![guild_name, username, role.as_str()],
+    )
+    .map_err(|error| format!("join guild failed: {}", error))?;
+    conn.execute(
+        "UPDATE users SET guild_name = ?1, guild_role = ?2 WHERE username = ?3",
+        params![guild_name, role.as_str(), username],
+    )
+    .map_err(|error| format!("update user guild failed: {}", error))?;
+    Ok(())
+}
+
+fn leave_guild(conn: &Connection, username: &str) -> Result<(), String> {
+    let Some((guild_name, guild_role)) = conn
+        .query_row(
+            "SELECT guild_name, guild_role FROM users WHERE username = ?1",
+            params![username],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                ))
+            },
+        )
+        .ok()
+    else {
+        return Err("player not found".to_string());
+    };
+    let Some(guild_name) = guild_name else {
+        return Err("not in a guild".to_string());
+    };
+    if guild_role.as_deref() == Some(GuildRole::Leader.as_str()) {
+        return Err("leader must disband guild".to_string());
+    }
+
+    conn.execute(
+        "DELETE FROM guild_members WHERE guild_name = ?1 AND username = ?2",
+        params![guild_name, username],
+    )
+    .map_err(|error| format!("leave guild failed: {}", error))?;
+    conn.execute(
+        "UPDATE users SET guild_name = NULL, guild_role = NULL WHERE username = ?1",
+        params![username],
+    )
+    .map_err(|error| format!("update user guild failed: {}", error))?;
+    Ok(())
+}
+
+fn disband_guild(conn: &Connection, username: &str) -> Result<String, String> {
+    let Some((Some(guild_name), Some(guild_role))) = conn
+        .query_row(
+            "SELECT guild_name, guild_role FROM users WHERE username = ?1",
+            params![username],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                ))
+            },
+        )
+        .ok()
+    else {
+        return Err("not in a guild".to_string());
+    };
+    if guild_role != GuildRole::Leader.as_str() {
+        return Err("only leader can disband".to_string());
+    }
+
+    conn.execute(
+        "DELETE FROM guild_members WHERE guild_name = ?1",
+        params![guild_name],
+    )
+    .map_err(|error| format!("clear guild members failed: {}", error))?;
+    conn.execute("DELETE FROM guilds WHERE name = ?1", params![guild_name])
+        .map_err(|error| format!("delete guild failed: {}", error))?;
+    conn.execute(
+        "UPDATE users SET guild_name = NULL, guild_role = NULL WHERE guild_name = ?1",
+        params![guild_name],
+    )
+    .map_err(|error| format!("clear users guild failed: {}", error))?;
+
+    Ok(guild_name)
+}
+
+fn query_guild_members(conn: &Connection, username: &str) -> (Option<String>, Vec<String>) {
+    let guild_name = conn
+        .query_row(
+            "SELECT guild_name FROM users WHERE username = ?1",
+            params![username],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .ok()
+        .flatten();
+    let Some(guild_name) = guild_name else {
+        return (None, Vec::new());
+    };
+
+    let mut statement = match conn.prepare(
+        "SELECT username FROM guild_members WHERE guild_name = ?1 ORDER BY role DESC, username ASC",
+    ) {
+        Ok(statement) => statement,
+        Err(_) => return (Some(guild_name), Vec::new()),
+    };
+    let rows = match statement.query_map(params![guild_name.clone()], |row| row.get::<_, String>(0))
+    {
+        Ok(rows) => rows,
+        Err(_) => return (Some(guild_name), Vec::new()),
+    };
+    let mut members = Vec::new();
+    for row in rows.flatten() {
+        members.push(row);
+    }
+    (Some(guild_name), members)
+}
+
 pub fn periodic_save_players(
     time: Res<Time>,
     save_tick: Option<ResMut<SaveTick>>,
@@ -508,6 +867,8 @@ pub fn periodic_save_players(
         &Experience,
         &BaseStats,
         &CharacterClass,
+        Option<&GuildMembership>,
+        Option<&KnownSpells>,
         &Inventory,
         &EquipmentMap,
         &QuestTracker,
@@ -543,6 +904,8 @@ pub fn periodic_save_players(
             exp,
             base_stats,
             class,
+            guild,
+            known_spells,
             inventory,
             equipment,
             quests,
@@ -563,6 +926,9 @@ pub fn periodic_save_players(
             exp_next: exp.next_level_req,
             base_stats: *base_stats,
             class: *class,
+            guild_name: guild.map(|value| value.guild_name.clone()),
+            guild_role: guild.map(|value| value.role),
+            known_spells: known_spells.cloned().unwrap_or_default(),
             inventory: inventory.clone(),
             equipment: equipment.clone(),
             quests: quests.clone(),
@@ -584,6 +950,8 @@ pub fn save_player_progress_on_change(
             &Experience,
             &BaseStats,
             &CharacterClass,
+            Option<&GuildMembership>,
+            Option<&KnownSpells>,
             &Inventory,
             &EquipmentMap,
             &QuestTracker,
@@ -596,6 +964,8 @@ pub fn save_player_progress_on_change(
             Changed<Experience>,
             Changed<BaseStats>,
             Changed<CharacterClass>,
+            Changed<GuildMembership>,
+            Changed<KnownSpells>,
             Changed<Inventory>,
             Changed<EquipmentMap>,
             Changed<QuestTracker>,
@@ -623,6 +993,8 @@ pub fn save_player_progress_on_change(
             exp,
             base_stats,
             class,
+            guild,
+            known_spells,
             inventory,
             equipment,
             quests,
@@ -644,6 +1016,9 @@ pub fn save_player_progress_on_change(
                 exp_next: exp.next_level_req,
                 base_stats: *base_stats,
                 class: *class,
+                guild_name: guild.map(|value| value.guild_name.clone()),
+                guild_role: guild.map(|value| value.role),
+                known_spells: known_spells.cloned().unwrap_or_default(),
                 inventory: inventory.clone(),
                 equipment: equipment.clone(),
                 quests: quests.clone(),

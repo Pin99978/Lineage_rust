@@ -1,13 +1,15 @@
 use bevy::prelude::*;
 use shared::protocol::{
     decode_client_message, encode_server_message, AttackIntent, ChatIntent, ClientMessage,
-    DamageEvent, EntityState, EquipmentUpdate, InventoryUpdate, ItemDespawnEvent, ItemSpawnEvent,
-    LoginRequest, LoginResponse, LootIntent, ManaUpdate, NetworkEntityKind, ServerMessage,
-    StatusEffectUpdate, SystemNotice, UseItemIntent,
+    DamageEvent, EntityState, EquipmentUpdate, GuildActionError, GuildInviteEvent,
+    GuildUpdateEvent, InventoryUpdate, ItemDespawnEvent, ItemSpawnEvent, LoginRequest,
+    LoginResponse, LootIntent, ManaUpdate, NetworkEntityKind, ServerMessage, StatusEffectUpdate,
+    SystemNotice, UseItemIntent,
 };
 use shared::{
-    ActionState, ArmorClass, BaseStats, Buffs, CharacterClass, CombatStats, Experience, Health,
-    Level, Mana, MapId, MoveSpeed, PathQueue, Position, SpellCooldowns, TargetPosition, MAP_TOWN,
+    ActionState, ArmorClass, BaseStats, Buffs, CharacterClass, CombatStats, Experience,
+    GuildMembership, GuildRole, Health, KnownSpells, Level, Mana, MapId, MoveSpeed, PathQueue,
+    Position, SpellCooldowns, TargetPosition, MAP_TOWN,
 };
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
@@ -16,7 +18,7 @@ use std::time::Instant;
 use crate::{
     db,
     systems::{
-        chat, combat, drop, equipment, interaction, item, loot, movement, npc, quest, spell,
+        chat, combat, drop, equipment, guild, interaction, item, loot, movement, npc, quest, spell,
     },
 };
 
@@ -99,6 +101,8 @@ pub fn receive_client_messages(
         &Experience,
         &BaseStats,
         &CharacterClass,
+        Option<&GuildMembership>,
+        Option<&KnownSpells>,
         &shared::Inventory,
         &shared::EquipmentMap,
         &Buffs,
@@ -114,6 +118,13 @@ pub fn receive_client_messages(
     mut chat_requests: MessageWriter<chat::ChatRequest>,
     mut move_requests: MessageWriter<movement::MoveRequest>,
     mut use_item_requests: MessageWriter<item::UseItemRequest>,
+    mut guild_requests: ParamSet<(
+        MessageWriter<guild::CreateGuildRequest>,
+        MessageWriter<guild::InviteToGuildRequest>,
+        MessageWriter<guild::RespondToGuildInviteRequest>,
+        MessageWriter<guild::LeaveGuildRequest>,
+        MessageWriter<guild::DisbandGuildRequest>,
+    )>,
 ) {
     let Some(mut network) = network else {
         return;
@@ -157,6 +168,8 @@ pub fn receive_client_messages(
                                 exp,
                                 base_stats,
                                 player_class,
+                                guild_membership,
+                                known_spells,
                                 inventory,
                                 equipment,
                                 _buffs,
@@ -177,6 +190,10 @@ pub fn receive_client_messages(
                                         exp_next: exp.next_level_req,
                                         base_stats: *base_stats,
                                         class: *player_class,
+                                        guild_name: guild_membership
+                                            .map(|value| value.guild_name.clone()),
+                                        guild_role: guild_membership.map(|value| value.role),
+                                        known_spells: known_spells.cloned().unwrap_or_default(),
                                         inventory: inventory.clone(),
                                         equipment: equipment.clone(),
                                         quests: quests.clone(),
@@ -364,6 +381,79 @@ pub fn receive_client_messages(
                     });
                 }
             }
+            ClientMessage::CreateGuildIntent(intent) => {
+                let session = network
+                    .sessions
+                    .entry(address)
+                    .or_insert_with(SessionState::new);
+                if !session.logged_in {
+                    continue;
+                }
+                if let Some(player_entity) = session.entity {
+                    guild_requests.p0().write(guild::CreateGuildRequest {
+                        player_entity,
+                        guild_name: intent.guild_name,
+                    });
+                }
+            }
+            ClientMessage::InviteToGuildIntent(intent) => {
+                let session = network
+                    .sessions
+                    .entry(address)
+                    .or_insert_with(SessionState::new);
+                if !session.logged_in {
+                    continue;
+                }
+                if let Some(player_entity) = session.entity {
+                    guild_requests.p1().write(guild::InviteToGuildRequest {
+                        player_entity,
+                        target_username: intent.target_username,
+                    });
+                }
+            }
+            ClientMessage::RespondToGuildInvite(intent) => {
+                let session = network
+                    .sessions
+                    .entry(address)
+                    .or_insert_with(SessionState::new);
+                if !session.logged_in {
+                    continue;
+                }
+                if let Some(player_entity) = session.entity {
+                    guild_requests.p2().write(guild::RespondToGuildInviteRequest {
+                        player_entity,
+                        accepted: intent.accepted,
+                    });
+                }
+            }
+            ClientMessage::LeaveGuildIntent(_) => {
+                let session = network
+                    .sessions
+                    .entry(address)
+                    .or_insert_with(SessionState::new);
+                if !session.logged_in {
+                    continue;
+                }
+                if let Some(player_entity) = session.entity {
+                    guild_requests
+                        .p3()
+                        .write(guild::LeaveGuildRequest { player_entity });
+                }
+            }
+            ClientMessage::DisbandGuildIntent(_) => {
+                let session = network
+                    .sessions
+                    .entry(address)
+                    .or_insert_with(SessionState::new);
+                if !session.logged_in {
+                    continue;
+                }
+                if let Some(player_entity) = session.entity {
+                    guild_requests
+                        .p4()
+                        .write(guild::DisbandGuildRequest { player_entity });
+                }
+            }
         }
     }
 }
@@ -380,6 +470,8 @@ fn handle_login_request(
         &Experience,
         &BaseStats,
         &CharacterClass,
+        Option<&GuildMembership>,
+        Option<&KnownSpells>,
         &shared::Inventory,
         &shared::EquipmentMap,
         &Buffs,
@@ -502,14 +594,29 @@ fn send_player_snapshot(
         &Experience,
         &BaseStats,
         &CharacterClass,
+        Option<&GuildMembership>,
+        Option<&KnownSpells>,
         &shared::Inventory,
         &shared::EquipmentMap,
         &Buffs,
         &shared::QuestTracker,
     )>,
 ) {
-    let Ok((_, _, mana, level, exp, base_stats, _class, inventory, equipment, buffs, quests)) =
-        player_snapshot.get(player_entity)
+    let Ok((
+        _,
+        _,
+        mana,
+        level,
+        exp,
+        base_stats,
+        _class,
+        _guild,
+        known_spells,
+        inventory,
+        equipment,
+        buffs,
+        quests,
+    )) = player_snapshot.get(player_entity)
     else {
         return;
     };
@@ -574,6 +681,18 @@ fn send_player_snapshot(
             let _ = socket.send_to(&payload, address);
         }
     }
+
+    if let Some(known_spells) = known_spells {
+        for spell in &known_spells.spells {
+            let message = ServerMessage::SpellLearnedEvent(shared::protocol::SpellLearnedEvent {
+                player_id,
+                spell: *spell,
+            });
+            if let Ok(payload) = encode_server_message(&message) {
+                let _ = socket.send_to(&payload, address);
+            }
+        }
+    }
 }
 
 pub fn cleanup_stale_sessions(
@@ -588,6 +707,8 @@ pub fn cleanup_stale_sessions(
         &Experience,
         &BaseStats,
         &CharacterClass,
+        Option<&GuildMembership>,
+        Option<&KnownSpells>,
         &shared::Inventory,
         &shared::EquipmentMap,
         &shared::QuestTracker,
@@ -620,6 +741,8 @@ pub fn cleanup_stale_sessions(
                     exp,
                     base_stats,
                     player_class,
+                    guild_membership,
+                    known_spells,
                     inventory,
                     equipment,
                     quests,
@@ -639,6 +762,9 @@ pub fn cleanup_stale_sessions(
                             exp_next: exp.next_level_req,
                             base_stats: *base_stats,
                             class: *player_class,
+                            guild_name: guild_membership.map(|value| value.guild_name.clone()),
+                            guild_role: guild_membership.map(|value| value.role),
+                            known_spells: known_spells.cloned().unwrap_or_default(),
                             inventory: inventory.clone(),
                             equipment: equipment.clone(),
                             quests: quests.clone(),
@@ -657,6 +783,7 @@ pub fn apply_db_results(
     mut commands: Commands,
     network: Option<ResMut<ServerNetwork>>,
     db_bridge: Option<Res<db::DbBridge>>,
+    player_state: Query<(Entity, &NetworkEntity, Option<&GuildMembership>), With<PlayerCharacter>>,
 ) {
     let Some(mut network) = network else {
         return;
@@ -733,6 +860,13 @@ pub fn apply_db_results(
                 });
                 player_commands.insert(data.base_stats);
                 player_commands.insert(data.class);
+                player_commands.insert(data.known_spells.clone());
+                if let Some(guild_name) = data.guild_name.clone() {
+                    player_commands.insert(GuildMembership {
+                        guild_name,
+                        role: data.guild_role.unwrap_or(GuildRole::Member),
+                    });
+                }
                 let player_entity = player_commands.id();
 
                 let session = network
@@ -808,6 +942,28 @@ pub fn apply_db_results(
                     let _ = network.socket.send_to(&payload, address);
                 }
 
+                for spell in &data.known_spells.spells {
+                    let learned =
+                        ServerMessage::SpellLearnedEvent(shared::protocol::SpellLearnedEvent {
+                            player_id,
+                            spell: *spell,
+                        });
+                    if let Ok(payload) = encode_server_message(&learned) {
+                        let _ = network.socket.send_to(&payload, address);
+                    }
+                }
+
+                if data.guild_name.is_some() {
+                    send_guild_update(
+                        &network,
+                        &player_state,
+                        address,
+                        player_id,
+                        data.guild_name.clone(),
+                        data.guild_role,
+                    );
+                }
+
                 for quest in &data.quests.active_quests {
                     let quest_message =
                         ServerMessage::QuestUpdateEvent(shared::protocol::QuestUpdateEvent {
@@ -835,7 +991,179 @@ pub fn apply_db_results(
             db::DbResult::SaveError { username, message } => {
                 warn!("save failed for {}: {}", username, message);
             }
+            db::DbResult::GuildCreated {
+                username,
+                guild_name,
+                role,
+            }
+            | db::DbResult::GuildJoined {
+                username,
+                guild_name,
+                role,
+            } => {
+                if let Some((address, entity, player_id)) =
+                    find_session_by_username(&network, &username)
+                {
+                    commands.entity(entity).insert(GuildMembership {
+                        guild_name: guild_name.clone(),
+                        role,
+                    });
+                    send_guild_update(
+                        &network,
+                        &player_state,
+                        address,
+                        player_id,
+                        Some(guild_name),
+                        Some(role),
+                    );
+                }
+            }
+            db::DbResult::GuildLeft { username } => {
+                if let Some((address, entity, player_id)) =
+                    find_session_by_username(&network, &username)
+                {
+                    commands.entity(entity).remove::<GuildMembership>();
+                    send_guild_update(&network, &player_state, address, player_id, None, None);
+                }
+            }
+            db::DbResult::GuildDisbanded {
+                username: _username,
+                guild_name,
+            } => {
+                let targets: Vec<(SocketAddr, Entity, u64)> = network
+                    .sessions
+                    .iter()
+                    .filter_map(|(address, session)| {
+                        let (Some(entity), Some(player_id), true) =
+                            (session.entity, session.player_id, session.logged_in)
+                        else {
+                            return None;
+                        };
+                        let Ok((_, _, membership)) = player_state.get(entity) else {
+                            return None;
+                        };
+                        if membership.map(|m| m.guild_name.as_str()) == Some(guild_name.as_str()) {
+                            Some((*address, entity, player_id))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                for (address, entity, player_id) in targets {
+                    commands.entity(entity).remove::<GuildMembership>();
+                    send_guild_update(&network, &player_state, address, player_id, None, None);
+                }
+            }
+            db::DbResult::GuildMembers {
+                username,
+                guild_name,
+                members: _members,
+            } => {
+                if let Some((address, _entity, player_id)) =
+                    find_session_by_username(&network, &username)
+                {
+                    let role = network
+                        .sessions
+                        .values()
+                        .filter_map(|session| session.entity)
+                        .find_map(|entity| {
+                            player_state
+                                .get(entity)
+                                .ok()
+                                .and_then(|(_, net, membership)| {
+                                    if net.id == player_id {
+                                        membership.map(|value| value.role)
+                                    } else {
+                                        None
+                                    }
+                                })
+                        });
+                    send_guild_update(
+                        &network,
+                        &player_state,
+                        address,
+                        player_id,
+                        guild_name,
+                        role,
+                    );
+                }
+            }
+            db::DbResult::GuildOpError { username, message } => {
+                if let Some((address, _entity, player_id)) =
+                    find_session_by_username(&network, &username)
+                {
+                    let response =
+                        ServerMessage::GuildActionError(GuildActionError { player_id, message });
+                    if let Ok(payload) = encode_server_message(&response) {
+                        let _ = network.socket.send_to(&payload, address);
+                    }
+                }
+            }
         }
+    }
+}
+
+fn find_session_by_username(
+    network: &ServerNetwork,
+    username: &str,
+) -> Option<(SocketAddr, Entity, u64)> {
+    network.sessions.iter().find_map(|(address, session)| {
+        let (Some(entity), Some(player_id), Some(name), true) = (
+            session.entity,
+            session.player_id,
+            session.username.as_ref(),
+            session.logged_in,
+        ) else {
+            return None;
+        };
+        if name == username {
+            Some((*address, entity, player_id))
+        } else {
+            None
+        }
+    })
+}
+
+fn send_guild_update(
+    network: &ServerNetwork,
+    player_state: &Query<(Entity, &NetworkEntity, Option<&GuildMembership>), With<PlayerCharacter>>,
+    address: SocketAddr,
+    player_id: u64,
+    guild_name: Option<String>,
+    role: Option<GuildRole>,
+) {
+    let member_usernames = if let Some(name) = guild_name.as_ref() {
+        network
+            .sessions
+            .values()
+            .filter_map(|session| {
+                let (Some(entity), Some(username), true) =
+                    (session.entity, session.username.as_ref(), session.logged_in)
+                else {
+                    return None;
+                };
+                let Ok((_, _, membership)) = player_state.get(entity) else {
+                    return None;
+                };
+                if membership.map(|m| m.guild_name.as_str()) == Some(name.as_str()) {
+                    Some(username.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    let message = ServerMessage::GuildUpdateEvent(GuildUpdateEvent {
+        player_id,
+        guild_name,
+        role,
+        member_usernames,
+    });
+    if let Ok(payload) = encode_server_message(&message) {
+        let _ = network.socket.send_to(&payload, address);
     }
 }
 
@@ -847,6 +1175,7 @@ pub fn broadcast_world_state(
         &Position,
         Option<&Health>,
         Option<&CharacterClass>,
+        Option<&GuildMembership>,
         Option<&PlayerCharacter>,
     )>,
 ) {
@@ -861,10 +1190,10 @@ pub fn broadcast_world_state(
         let Some(player_entity) = session.entity else {
             continue;
         };
-        let Ok((_, player_map, _, _, _, _)) = entities.get(player_entity) else {
+        let Ok((_, player_map, _, _, _, _, _)) = entities.get(player_entity) else {
             continue;
         };
-        for (network_entity, entity_map, position, health, class, _) in &entities {
+        for (network_entity, entity_map, position, health, class, guild, _) in &entities {
             if entity_map.0 != player_map.0 {
                 continue;
             }
@@ -877,6 +1206,7 @@ pub fn broadcast_world_state(
                 entity_id: network_entity.id,
                 kind: network_entity.kind,
                 class: class.copied().unwrap_or_default(),
+                guild_name: guild.map(|value| value.guild_name.clone()),
                 map_id: entity_map.0.clone(),
                 x: position.x,
                 y: position.y,
@@ -966,6 +1296,65 @@ pub fn broadcast_system_notices(
     }
 }
 
+pub fn broadcast_guild_events(
+    network: Option<Res<ServerNetwork>>,
+    mut invites: MessageReader<guild::GuildInviteMessage>,
+    mut errors: MessageReader<guild::GuildActionErrorMessage>,
+    mut updates: MessageReader<guild::GuildUpdateMessage>,
+) {
+    let Some(network) = network else {
+        return;
+    };
+
+    for invite in invites.read() {
+        let message = ServerMessage::GuildInviteEvent(GuildInviteEvent {
+            player_id: invite.player_id,
+            from_username: invite.from_username.clone(),
+            guild_name: invite.guild_name.clone(),
+        });
+        let Ok(payload) = encode_server_message(&message) else {
+            continue;
+        };
+        for (&address, session) in &network.sessions {
+            if session.logged_in && session.player_id == Some(invite.player_id) {
+                let _ = network.socket.send_to(&payload, address);
+            }
+        }
+    }
+
+    for error in errors.read() {
+        let message = ServerMessage::GuildActionError(GuildActionError {
+            player_id: error.player_id,
+            message: error.message.clone(),
+        });
+        let Ok(payload) = encode_server_message(&message) else {
+            continue;
+        };
+        for (&address, session) in &network.sessions {
+            if session.logged_in && session.player_id == Some(error.player_id) {
+                let _ = network.socket.send_to(&payload, address);
+            }
+        }
+    }
+
+    for update in updates.read() {
+        let message = ServerMessage::GuildUpdateEvent(GuildUpdateEvent {
+            player_id: update.player_id,
+            guild_name: update.guild_name.clone(),
+            role: update.role,
+            member_usernames: update.member_usernames.clone(),
+        });
+        let Ok(payload) = encode_server_message(&message) else {
+            continue;
+        };
+        for (&address, session) in &network.sessions {
+            if session.logged_in && session.player_id == Some(update.player_id) {
+                let _ = network.socket.send_to(&payload, address);
+            }
+        }
+    }
+}
+
 pub fn broadcast_item_events(
     network: Option<Res<ServerNetwork>>,
     players: Query<&MapId, With<PlayerCharacter>>,
@@ -1043,6 +1432,7 @@ pub fn broadcast_spell_events(
     network: Option<Res<ServerNetwork>>,
     mut mana_events: MessageReader<spell::ManaChangedMessage>,
     mut heal_events: MessageReader<spell::HealEventMessage>,
+    mut learned_events: MessageReader<spell::SpellLearnedMessage>,
 ) {
     let Some(network) = network else {
         return;
@@ -1067,6 +1457,18 @@ pub fn broadcast_spell_events(
         };
         for (&address, session) in &network.sessions {
             if session.logged_in {
+                let _ = network.socket.send_to(&payload, address);
+            }
+        }
+    }
+
+    for learned in learned_events.read() {
+        let message = ServerMessage::SpellLearnedEvent(spell::to_spell_learned_event(*learned));
+        let Ok(payload) = encode_server_message(&message) else {
+            continue;
+        };
+        for (&address, session) in &network.sessions {
+            if session.logged_in && session.player_id == Some(learned.player_id) {
                 let _ = network.socket.send_to(&payload, address);
             }
         }

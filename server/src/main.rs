@@ -29,6 +29,7 @@ fn main() {
         .add_message::<systems::spell::CastSpellRequest>()
         .add_message::<systems::spell::ManaChangedMessage>()
         .add_message::<systems::spell::HealEventMessage>()
+        .add_message::<systems::spell::SpellLearnedMessage>()
         .add_message::<systems::equipment::EquipRequest>()
         .add_message::<systems::equipment::UnequipRequest>()
         .add_message::<systems::equipment::EquipmentChangedMessage>()
@@ -40,6 +41,14 @@ fn main() {
         .add_message::<systems::quest::QuestUpdatedMessage>()
         .add_message::<systems::chat::ChatRequest>()
         .add_message::<systems::chat::ChatDelivery>()
+        .add_message::<systems::guild::CreateGuildRequest>()
+        .add_message::<systems::guild::InviteToGuildRequest>()
+        .add_message::<systems::guild::RespondToGuildInviteRequest>()
+        .add_message::<systems::guild::LeaveGuildRequest>()
+        .add_message::<systems::guild::DisbandGuildRequest>()
+        .add_message::<systems::guild::GuildUpdateMessage>()
+        .add_message::<systems::guild::GuildInviteMessage>()
+        .add_message::<systems::guild::GuildActionErrorMessage>()
         .add_message::<systems::movement::MoveRequest>()
         .add_message::<systems::item::UseItemRequest>()
         .add_message::<systems::combat::StatusEffectsChangedMessage>()
@@ -48,6 +57,7 @@ fn main() {
             (
                 db::setup_db,
                 network::setup_network,
+                systems::guild::setup_guild_system,
                 map_data::setup_world_map,
             )
                 .chain(),
@@ -55,33 +65,48 @@ fn main() {
         .add_systems(
             Update,
             (
-                (
-                    network::receive_client_messages,
-                    network::cleanup_stale_sessions,
-                    network::apply_db_results,
-                    systems::movement::process_move_requests,
-                    systems::spawner::spawner_system,
-                    systems::ai::ai_aggro_system,
-                    systems::ai::ai_chase_and_attack_system,
-                    systems::movement::movement_system,
-                    systems::combat::combat_system,
-                    systems::combat::update_status_effects_system,
-                    systems::combat::experience_and_level_system,
-                ),
-                (
-                    systems::combat::death_penalty_system,
-                    systems::spell::tick_spell_cooldowns,
-                    systems::spell::cast_spell_system,
-                    systems::item::use_item_system,
-                    systems::interaction::interaction_system,
-                    systems::interaction::portal_system,
-                    systems::npc::convert_legacy_dialog_to_npc,
-                    systems::npc::npc_dialogue_system,
-                    systems::chat::chat_system,
-                    systems::quest::track_enemy_kill_quest_system,
-                ),
-            )
-                .chain(),
+                network::receive_client_messages,
+                network::cleanup_stale_sessions,
+                network::apply_db_results,
+                systems::movement::process_move_requests,
+                systems::spawner::spawner_system,
+                systems::ai::ai_aggro_system,
+            ),
+        )
+        .add_systems(
+            Update,
+            (
+                systems::ai::ai_chase_and_attack_system,
+                systems::movement::movement_system,
+                systems::combat::combat_system,
+                systems::combat::update_status_effects_system,
+                systems::combat::experience_and_level_system,
+            ),
+        )
+        .add_systems(
+            Update,
+            (
+                systems::combat::death_penalty_system,
+                systems::spell::tick_spell_cooldowns,
+                systems::spell::cast_spell_system,
+                systems::item::use_item_system,
+                systems::interaction::interaction_system,
+                systems::interaction::portal_system,
+                systems::npc::convert_legacy_dialog_to_npc,
+            ),
+        )
+        .add_systems(
+            Update,
+            (
+                systems::npc::npc_dialogue_system,
+                systems::chat::chat_system,
+                systems::guild::handle_create_guild,
+                systems::guild::handle_invite_to_guild,
+                systems::guild::handle_respond_to_guild_invite,
+                systems::guild::handle_leave_guild,
+                systems::guild::handle_disband_guild,
+                systems::quest::track_enemy_kill_quest_system,
+            ),
         )
         .add_systems(
             Update,
@@ -101,6 +126,7 @@ fn main() {
                 network::broadcast_world_state,
                 network::broadcast_combat_events,
                 network::broadcast_system_notices,
+                network::broadcast_guild_events,
                 network::broadcast_item_events,
                 network::broadcast_spell_events,
                 network::broadcast_progression_events,

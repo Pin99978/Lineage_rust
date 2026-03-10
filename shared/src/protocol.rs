@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    CharacterClass, EquipmentMap, EquipmentSlot, ItemType, QuestId, QuestStatus, SpellType,
-    StatusEffect,
+    CharacterClass, EquipmentMap, EquipmentSlot, GuildRole, ItemType, QuestId, QuestStatus,
+    SpellType, StatusEffect,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,6 +18,11 @@ pub enum ClientMessage {
     InteractNpcIntent(InteractNpcIntent),
     ChatIntent(ChatIntent),
     UseItemIntent(UseItemIntent),
+    CreateGuildIntent(CreateGuildIntent),
+    InviteToGuildIntent(InviteToGuildIntent),
+    RespondToGuildInvite(RespondToGuildInvite),
+    LeaveGuildIntent(LeaveGuildIntent),
+    DisbandGuildIntent(DisbandGuildIntent),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,6 +79,7 @@ pub enum ChatChannel {
     Say,
     Shout,
     Whisper,
+    Guild,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,6 +93,27 @@ pub struct ChatIntent {
 pub struct UseItemIntent {
     pub item_type: ItemType,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateGuildIntent {
+    pub guild_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InviteToGuildIntent {
+    pub target_username: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct RespondToGuildInvite {
+    pub accepted: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct LeaveGuildIntent;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct DisbandGuildIntent;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerMessage {
@@ -104,12 +131,16 @@ pub enum ServerMessage {
     LevelUpEvent(LevelUpEvent),
     EquipmentUpdate(EquipmentUpdate),
     HealEvent(HealEvent),
+    SpellLearnedEvent(SpellLearnedEvent),
     DialogEvent(DialogEvent),
     DialogueResponse(DialogueResponse),
     ChatEvent(ChatEvent),
     QuestUpdateEvent(QuestUpdateEvent),
     StatusEffectUpdate(StatusEffectUpdate),
     SystemNotice(SystemNotice),
+    GuildUpdateEvent(GuildUpdateEvent),
+    GuildInviteEvent(GuildInviteEvent),
+    GuildActionError(GuildActionError),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,6 +164,7 @@ pub struct EntityState {
     pub entity_id: u64,
     pub kind: NetworkEntityKind,
     pub class: CharacterClass,
+    pub guild_name: Option<String>,
     pub map_id: String,
     pub x: f32,
     pub y: f32,
@@ -222,6 +254,12 @@ pub struct HealEvent {
     pub resulting_hp: i32,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct SpellLearnedEvent {
+    pub player_id: u64,
+    pub spell: SpellType,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DialogEvent {
     pub player_id: u64,
@@ -260,6 +298,27 @@ pub struct StatusEffectUpdate {
 pub struct SystemNotice {
     pub player_id: u64,
     pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GuildUpdateEvent {
+    pub player_id: u64,
+    pub guild_name: Option<String>,
+    pub role: Option<GuildRole>,
+    pub member_usernames: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GuildInviteEvent {
+    pub player_id: u64,
+    pub from_username: String,
+    pub guild_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GuildActionError {
+    pub player_id: u64,
+    pub message: String,
 }
 
 pub fn encode_client_message(message: &ClientMessage) -> Result<Vec<u8>, bincode::Error> {

@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use shared::protocol::{ChatChannel, ChatEvent};
-use shared::Position;
+use shared::{GuildMembership, Position};
 
 use crate::network;
 
@@ -27,11 +27,15 @@ struct OnlinePlayer {
     player_id: u64,
     username: String,
     position: Vec2,
+    guild_name: Option<String>,
 }
 
 pub fn chat_system(
     network: Option<Res<network::ServerNetwork>>,
-    players: Query<(&Position, &network::NetworkEntity), With<network::PlayerCharacter>>,
+    players: Query<
+        (&Position, &network::NetworkEntity, Option<&GuildMembership>),
+        With<network::PlayerCharacter>,
+    >,
     mut requests: MessageReader<ChatRequest>,
     mut deliveries: MessageWriter<ChatDelivery>,
 ) {
@@ -124,13 +128,43 @@ pub fn chat_system(
                     });
                 }
             }
+            ChatChannel::Guild => {
+                let Some(guild_name) = sender.guild_name.as_ref() else {
+                    deliveries.write(ChatDelivery {
+                        recipient_player_id: sender.player_id,
+                        event: ChatEvent {
+                            sender: "System".to_string(),
+                            channel: ChatChannel::Guild,
+                            message: "You are not in a guild.".to_string(),
+                        },
+                    });
+                    continue;
+                };
+
+                for recipient in online_players
+                    .iter()
+                    .filter(|candidate| candidate.guild_name.as_ref() == Some(guild_name))
+                {
+                    deliveries.write(ChatDelivery {
+                        recipient_player_id: recipient.player_id,
+                        event: ChatEvent {
+                            sender: sender.username.clone(),
+                            channel: ChatChannel::Guild,
+                            message: message.clone(),
+                        },
+                    });
+                }
+            }
         }
     }
 }
 
 fn collect_online_players(
     network: &network::ServerNetwork,
-    players: &Query<(&Position, &network::NetworkEntity), With<network::PlayerCharacter>>,
+    players: &Query<
+        (&Position, &network::NetworkEntity, Option<&GuildMembership>),
+        With<network::PlayerCharacter>,
+    >,
 ) -> Vec<OnlinePlayer> {
     network
         .sessions
@@ -142,7 +176,7 @@ fn collect_online_players(
             else {
                 return None;
             };
-            let Ok((position, _)) = players.get(entity) else {
+            let Ok((position, _, guild)) = players.get(entity) else {
                 return None;
             };
             Some(OnlinePlayer {
@@ -150,6 +184,7 @@ fn collect_online_players(
                 player_id,
                 username,
                 position: Vec2::new(position.x, position.y),
+                guild_name: guild.map(|value| value.guild_name.clone()),
             })
         })
         .collect()

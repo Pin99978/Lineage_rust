@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use shared::{
-    AggroRange, AiState, AttackCooldown, Buffs, CombatStats, Health, LootTable, PathQueue,
-    Position, TargetPosition,
+    AggroRange, AiState, AttackCooldown, Buffs, CombatStats, Health, ItemType, LootDropEntry,
+    LootTable, PathQueue, Position, TargetPosition, MAP_DUNGEON_1,
 };
 
 use crate::{
@@ -53,7 +53,7 @@ pub fn spawn_enemy_at(
             max: 120,
         },
         Buffs::default(),
-        LootTable::default(),
+        enemy_loot_table_for_map(&map_id.0),
         CombatStats {
             attack_power: 12,
             attack_range: 52.0,
@@ -67,6 +67,80 @@ pub fn spawn_enemy_at(
         EnemyPathRepathTimer::default(),
     ));
     entity.id()
+}
+
+fn enemy_loot_table_for_map(map_id: &str) -> LootTable {
+    if map_id == MAP_DUNGEON_1 {
+        return LootTable {
+            entries: vec![
+                LootDropEntry {
+                    item_type: ItemType::Gold,
+                    amount: 12,
+                    chance_permille: 1000,
+                },
+                LootDropEntry {
+                    item_type: ItemType::HealthPotion,
+                    amount: 1,
+                    chance_permille: 320,
+                },
+                LootDropEntry {
+                    item_type: ItemType::BronzeSword,
+                    amount: 1,
+                    chance_permille: 140,
+                },
+                LootDropEntry {
+                    item_type: ItemType::LeatherArmor,
+                    amount: 1,
+                    chance_permille: 170,
+                },
+                LootDropEntry {
+                    item_type: ItemType::ScrollPoisonArrow,
+                    amount: 1,
+                    chance_permille: 80,
+                },
+                LootDropEntry {
+                    item_type: ItemType::ScrollLightning,
+                    amount: 1,
+                    chance_permille: 50,
+                },
+                LootDropEntry {
+                    item_type: ItemType::ScrollBless,
+                    amount: 1,
+                    chance_permille: 60,
+                },
+            ],
+        };
+    }
+
+    LootTable {
+        entries: vec![
+            LootDropEntry {
+                item_type: ItemType::Gold,
+                amount: 12,
+                chance_permille: 1000,
+            },
+            LootDropEntry {
+                item_type: ItemType::HealthPotion,
+                amount: 1,
+                chance_permille: 320,
+            },
+            LootDropEntry {
+                item_type: ItemType::BronzeSword,
+                amount: 1,
+                chance_permille: 140,
+            },
+            LootDropEntry {
+                item_type: ItemType::LeatherArmor,
+                amount: 1,
+                chance_permille: 170,
+            },
+            LootDropEntry {
+                item_type: ItemType::ScrollPoisonArrow,
+                amount: 1,
+                chance_permille: 140,
+            },
+        ],
+    }
 }
 
 pub fn ai_aggro_system(

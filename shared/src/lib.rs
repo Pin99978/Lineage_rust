@@ -6,12 +6,13 @@ pub mod protocol;
 pub use components::ai::{AggroRange, AiState, AttackCooldown};
 pub use components::combat::{
     class_def, experience_required_for_level, spell_def, ActionState, ArmorClass, BaseStats, Buffs,
-    CharacterClass, CombatStats, EffectType, Experience, Health, Level, Mana, SpellCooldowns,
-    SpellType, StatusEffect,
+    CharacterClass, CombatStats, EffectType, Experience, Health, KnownSpells, Level, Mana,
+    SpellCooldowns, SpellType, StatusEffect,
 };
+pub use components::guild::{GuildMembership, GuildRole};
 pub use components::item::{
-    item_modifier, item_slot, EquipmentMap, EquipmentSlot, GroundItem, Inventory, ItemType,
-    LootDropEntry, LootTable, StatModifier,
+    item_modifier, item_slot, scroll_spell, EquipmentMap, EquipmentSlot, GroundItem, Inventory,
+    ItemType, LootDropEntry, LootTable, StatModifier,
 };
 pub use components::movement::{MoveSpeed, PathQueue, Position, TargetPosition};
 pub use components::npc::{Npc, NpcMarker, NpcType};
@@ -39,9 +40,12 @@ impl Plugin for MovementComponentsPlugin {
             .register_type::<SpellType>()
             .register_type::<CharacterClass>()
             .register_type::<SpellCooldowns>()
+            .register_type::<KnownSpells>()
             .register_type::<EffectType>()
             .register_type::<StatusEffect>()
             .register_type::<Buffs>()
+            .register_type::<GuildRole>()
+            .register_type::<GuildMembership>()
             .register_type::<GroundItem>()
             .register_type::<Inventory>()
             .register_type::<ItemType>()

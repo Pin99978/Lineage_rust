@@ -1,8 +1,9 @@
 use bevy::prelude::*;
 use shared::protocol::{
     decode_server_message, encode_client_message, AttackIntent, CastSpellIntent, ChatIntent,
-    ClientMessage, EntityState, EquipIntent, InteractNpcIntent, LoginRequest, LootIntent,
-    NetworkEntityKind, ServerMessage, UnequipIntent, UseItemIntent,
+    ClientMessage, CreateGuildIntent, DisbandGuildIntent, EntityState, EquipIntent,
+    InteractNpcIntent, InviteToGuildIntent, LeaveGuildIntent, LoginRequest, LootIntent,
+    NetworkEntityKind, RespondToGuildInvite, ServerMessage, UnequipIntent, UseItemIntent,
 };
 use shared::{CharacterClass, EquipmentSlot, Health, ItemType, Position, SpellType, MAP_TOWN};
 use std::collections::HashMap;
@@ -206,6 +207,10 @@ pub fn receive_server_state(
                 hud_state.exp_current = 0;
                 hud_state.exp_next = 100;
                 hud_state.class = CharacterClass::Knight;
+                hud_state.guild_name = None;
+                hud_state.guild_role = None;
+                hud_state.guild_members.clear();
+                hud_state.known_spells.clear();
                 hud_state.str_stat = 15;
                 hud_state.dex = 15;
                 hud_state.int_stat = 15;
@@ -238,6 +243,7 @@ pub fn receive_server_state(
                 if local_player.id == Some(state.entity_id) {
                     local_player.map_id = state.map_id.clone();
                     hud_state.class = state.class;
+                    hud_state.guild_name = state.guild_name.clone();
                 }
                 apply_entity_state(
                     &mut commands,
@@ -352,6 +358,17 @@ pub fn receive_server_state(
                     event.target_id, event.amount, event.resulting_hp
                 );
             }
+            ServerMessage::SpellLearnedEvent(event) => {
+                if local_player.id == Some(event.player_id) {
+                    if !hud_state.known_spells.contains(&event.spell) {
+                        hud_state.known_spells.push(event.spell);
+                    }
+                    systems::ui::chat::push_system_line(
+                        &mut chat_state,
+                        format!("你學會了 [{}]！", spell_label(event.spell)),
+                    );
+                }
+            }
             ServerMessage::DialogEvent(event) => {
                 if local_player.id == Some(event.player_id) {
                     dialog_state.text = event.text;
@@ -375,6 +392,7 @@ pub fn receive_server_state(
                     shared::protocol::ChatChannel::Say => "[Say]",
                     shared::protocol::ChatChannel::Shout => "[Shout]",
                     shared::protocol::ChatChannel::Whisper => "[Whisper]",
+                    shared::protocol::ChatChannel::Guild => "[Guild]",
                 };
                 systems::ui::chat::push_history_line(
                     &mut chat_state,
@@ -384,6 +402,32 @@ pub fn receive_server_state(
             ServerMessage::SystemNotice(event) => {
                 if local_player.id == Some(event.player_id) {
                     systems::ui::chat::push_system_line(&mut chat_state, event.text);
+                }
+            }
+            ServerMessage::GuildUpdateEvent(event) => {
+                if local_player.id == Some(event.player_id) {
+                    hud_state.guild_name = event.guild_name;
+                    hud_state.guild_role = event.role;
+                    hud_state.guild_members = event.member_usernames;
+                }
+            }
+            ServerMessage::GuildInviteEvent(event) => {
+                if local_player.id == Some(event.player_id) {
+                    systems::ui::chat::push_system_line(
+                        &mut chat_state,
+                        format!(
+                            "Guild invite from {} to join {}. Use /guild accept or /guild deny.",
+                            event.from_username, event.guild_name
+                        ),
+                    );
+                }
+            }
+            ServerMessage::GuildActionError(event) => {
+                if local_player.id == Some(event.player_id) {
+                    systems::ui::chat::push_system_line(
+                        &mut chat_state,
+                        format!("Guild error: {}", event.message),
+                    );
                 }
             }
             ServerMessage::StatusEffectUpdate(event) => {
@@ -522,6 +566,9 @@ fn spawn_or_update_item(
         shared::ItemType::HealthPotion => NetworkEntityKind::LootHealthPotion,
         shared::ItemType::BronzeSword => NetworkEntityKind::LootGold,
         shared::ItemType::LeatherArmor => NetworkEntityKind::LootHealthPotion,
+        shared::ItemType::ScrollLightning => NetworkEntityKind::LootHealthPotion,
+        shared::ItemType::ScrollPoisonArrow => NetworkEntityKind::LootHealthPotion,
+        shared::ItemType::ScrollBless => NetworkEntityKind::LootHealthPotion,
     };
 
     if let Some(entity) = entity_map.entity_by_id.get(&item_id).copied() {
@@ -566,11 +613,53 @@ pub fn unequip_slot_by_hotkey(network: &ClientNetwork, slot: EquipmentSlot) {
     send_unequip_intent(network, UnequipIntent { slot });
 }
 
+pub fn send_create_guild_intent(network: &ClientNetwork, guild_name: String) {
+    send_to_server(
+        network,
+        &ClientMessage::CreateGuildIntent(CreateGuildIntent { guild_name }),
+    );
+}
+
+pub fn send_invite_to_guild_intent(network: &ClientNetwork, target_username: String) {
+    send_to_server(
+        network,
+        &ClientMessage::InviteToGuildIntent(InviteToGuildIntent { target_username }),
+    );
+}
+
+pub fn send_respond_guild_invite_intent(network: &ClientNetwork, accepted: bool) {
+    send_to_server(
+        network,
+        &ClientMessage::RespondToGuildInvite(RespondToGuildInvite { accepted }),
+    );
+}
+
+pub fn send_leave_guild_intent(network: &ClientNetwork) {
+    send_to_server(network, &ClientMessage::LeaveGuildIntent(LeaveGuildIntent));
+}
+
+pub fn send_disband_guild_intent(network: &ClientNetwork) {
+    send_to_server(
+        network,
+        &ClientMessage::DisbandGuildIntent(DisbandGuildIntent),
+    );
+}
+
 fn is_loot_kind(kind: NetworkEntityKind) -> bool {
     matches!(
         kind,
         NetworkEntityKind::LootGold | NetworkEntityKind::LootHealthPotion
     )
+}
+
+fn spell_label(spell: SpellType) -> &'static str {
+    match spell {
+        SpellType::Fireball => "Fireball",
+        SpellType::Heal => "Heal",
+        SpellType::Lightning => "Lightning",
+        SpellType::PoisonArrow => "Poison Arrow",
+        SpellType::Bless => "Bless",
+    }
 }
 
 fn clear_map_state(

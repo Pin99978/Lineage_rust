@@ -76,14 +76,20 @@ pub fn chat_focus_and_send_system(
         return;
     }
 
+    if let Some(ref network) = network {
+        if handle_guild_command(network, &raw, &mut chat_state) {
+            return;
+        }
+    }
+
     let (channel, target, message) = parse_chat_command(&raw);
     if message.is_empty() {
         return;
     }
 
-    if let Some(network) = network {
+    if let Some(ref network) = network {
         network::send_chat_intent(
-            &network,
+            network,
             ChatIntent {
                 channel,
                 target,
@@ -173,6 +179,12 @@ pub fn push_system_line(chat_state: &mut ChatUiState, line: String) {
 fn parse_chat_command(raw: &str) -> (ChatChannel, Option<String>, String) {
     let trimmed = raw.trim();
     if let Some(rest) = trimmed
+        .strip_prefix("/guildchat ")
+        .or_else(|| trimmed.strip_prefix("/g "))
+    {
+        return (ChatChannel::Guild, None, truncate(rest.trim()));
+    }
+    if let Some(rest) = trimmed
         .strip_prefix("/shout ")
         .or_else(|| trimmed.strip_prefix("/sh "))
     {
@@ -203,6 +215,60 @@ fn parse_chat_command(raw: &str) -> (ChatChannel, Option<String>, String) {
     }
 
     (ChatChannel::Say, None, truncate(trimmed))
+}
+
+fn handle_guild_command(
+    network: &network::ClientNetwork,
+    raw: &str,
+    chat_state: &mut ChatUiState,
+) -> bool {
+    let trimmed = raw.trim();
+    let Some(rest) = trimmed.strip_prefix("/guild ") else {
+        return false;
+    };
+    let mut parts = rest.split_whitespace();
+    let Some(action) = parts.next() else {
+        push_history_line(
+            chat_state,
+            "[System] Usage: /guild create|invite|leave|disband|accept|deny".to_string(),
+        );
+        return true;
+    };
+
+    match action {
+        "create" => {
+            let guild_name = parts.collect::<Vec<&str>>().join(" ");
+            if guild_name.trim().is_empty() {
+                push_history_line(
+                    chat_state,
+                    "[System] Usage: /guild create <name>".to_string(),
+                );
+            } else {
+                network::send_create_guild_intent(network, guild_name.trim().to_string());
+            }
+        }
+        "invite" => {
+            let Some(target) = parts.next() else {
+                push_history_line(
+                    chat_state,
+                    "[System] Usage: /guild invite <player>".to_string(),
+                );
+                return true;
+            };
+            network::send_invite_to_guild_intent(network, target.to_string());
+        }
+        "leave" => network::send_leave_guild_intent(network),
+        "disband" => network::send_disband_guild_intent(network),
+        "accept" => network::send_respond_guild_invite_intent(network, true),
+        "deny" => network::send_respond_guild_invite_intent(network, false),
+        _ => {
+            push_history_line(
+                chat_state,
+                "[System] Usage: /guild create|invite|leave|disband|accept|deny".to_string(),
+            );
+        }
+    }
+    true
 }
 
 fn truncate(text: &str) -> String {

@@ -3,6 +3,7 @@ pub mod chat;
 pub mod combat;
 pub mod drop;
 pub mod equipment;
+pub mod guild;
 pub mod interaction;
 pub mod item;
 pub mod loot;

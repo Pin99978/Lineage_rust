@@ -2,6 +2,8 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::SpellType;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize, Default)]
 pub enum ItemType {
     #[default]
@@ -9,6 +11,9 @@ pub enum ItemType {
     HealthPotion,
     BronzeSword,
     LeatherArmor,
+    ScrollLightning,
+    ScrollPoisonArrow,
+    ScrollBless,
 }
 
 #[derive(Component, Debug, Clone, Copy, Reflect, Serialize, Deserialize)]
@@ -74,6 +79,15 @@ pub fn item_modifier(item_type: ItemType) -> StatModifier {
     }
 }
 
+pub fn scroll_spell(item_type: ItemType) -> Option<SpellType> {
+    match item_type {
+        ItemType::ScrollLightning => Some(SpellType::Lightning),
+        ItemType::ScrollPoisonArrow => Some(SpellType::PoisonArrow),
+        ItemType::ScrollBless => Some(SpellType::Bless),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Copy, Reflect, Serialize, Deserialize)]
 pub struct LootDropEntry {
     pub item_type: ItemType,
@@ -110,6 +124,11 @@ impl Default for LootTable {
                     item_type: ItemType::LeatherArmor,
                     amount: 1,
                     chance_permille: 170,
+                },
+                LootDropEntry {
+                    item_type: ItemType::ScrollPoisonArrow,
+                    amount: 1,
+                    chance_permille: 120,
                 },
             ],
         }

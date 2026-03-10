@@ -1,10 +1,14 @@
 use bevy::prelude::*;
 use shared::protocol::{InteractNpcIntent, LoginRequest};
-use shared::{CharacterClass, EquipmentMap, Health, QuestId, QuestStatus, StatusEffect};
+use shared::{
+    CharacterClass, EquipmentMap, GuildRole, Health, QuestId, QuestStatus, SpellType,
+    StatusEffect,
+};
 
 use crate::{network, Player};
 
 pub mod chat;
+pub mod guild;
 pub mod inventory;
 pub mod paperdoll;
 pub mod quest_log;
@@ -38,6 +42,10 @@ impl Default for LoginClassSelection {
 #[derive(Resource, Debug, Clone)]
 pub struct HudState {
     pub class: CharacterClass,
+    pub guild_name: Option<String>,
+    pub guild_role: Option<GuildRole>,
+    pub guild_members: Vec<String>,
+    pub known_spells: Vec<SpellType>,
     pub mana_current: i32,
     pub mana_max: i32,
     pub level: u32,
@@ -56,6 +64,10 @@ impl Default for HudState {
     fn default() -> Self {
         Self {
             class: CharacterClass::Knight,
+            guild_name: None,
+            guild_role: None,
+            guild_members: Vec::new(),
+            known_spells: Vec::new(),
             mana_current: 60,
             mana_max: 60,
             level: 1,
@@ -417,6 +429,7 @@ pub fn setup_ui(mut commands: Commands) {
     ));
 
     chat::setup_chat_ui(&mut commands);
+    guild::setup_guild_ui(&mut commands);
     inventory::setup_inventory_ui(&mut commands);
     paperdoll::setup_paperdoll_ui(&mut commands);
     quest_log::setup_quest_log_ui(&mut commands);
