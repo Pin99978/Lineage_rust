@@ -23,7 +23,7 @@ use crate::{
 };
 
 const SERVER_BIND_ADDR: &str = "127.0.0.1:5000";
-const MAX_PACKET_SIZE: usize = 1024;
+const MAX_PACKET_SIZE: usize = 4096;
 const SESSION_TIMEOUT_SECS: f32 = 15.0;
 
 #[derive(Component, Debug, Clone, Copy)]

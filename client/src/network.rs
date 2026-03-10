@@ -12,7 +12,7 @@ use std::net::{SocketAddr, UdpSocket};
 use crate::{systems, Player};
 
 const SERVER_ADDR: &str = "127.0.0.1:5000";
-const MAX_PACKET_SIZE: usize = 1024;
+const MAX_PACKET_SIZE: usize = 4096;
 
 #[derive(Resource)]
 pub struct ClientNetwork {

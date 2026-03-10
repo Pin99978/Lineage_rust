@@ -321,18 +321,18 @@ pub struct GuildActionError {
     pub message: String,
 }
 
-pub fn encode_client_message(message: &ClientMessage) -> Result<Vec<u8>, bincode::Error> {
-    bincode::serialize(message)
+pub fn encode_client_message(message: &ClientMessage) -> Result<Vec<u8>, serde_json::Error> {
+    serde_json::to_vec(message)
 }
 
-pub fn decode_client_message(payload: &[u8]) -> Result<ClientMessage, bincode::Error> {
-    bincode::deserialize(payload)
+pub fn decode_client_message(payload: &[u8]) -> Result<ClientMessage, serde_json::Error> {
+    serde_json::from_slice(payload)
 }
 
-pub fn encode_server_message(message: &ServerMessage) -> Result<Vec<u8>, bincode::Error> {
-    bincode::serialize(message)
+pub fn encode_server_message(message: &ServerMessage) -> Result<Vec<u8>, serde_json::Error> {
+    serde_json::to_vec(message)
 }
 
-pub fn decode_server_message(payload: &[u8]) -> Result<ServerMessage, bincode::Error> {
-    bincode::deserialize(payload)
+pub fn decode_server_message(payload: &[u8]) -> Result<ServerMessage, serde_json::Error> {
+    serde_json::from_slice(payload)
 }
