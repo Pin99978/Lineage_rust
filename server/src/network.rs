@@ -3,7 +3,7 @@ use shared::protocol::{
     decode_client_message, encode_server_message, AttackIntent, ChatIntent, ClientMessage,
     DamageEvent, EntityState, EquipmentUpdate, InventoryUpdate, ItemDespawnEvent, ItemSpawnEvent,
     LoginRequest, LoginResponse, LootIntent, ManaUpdate, NetworkEntityKind, ServerMessage,
-    StatusEffectUpdate, UseItemIntent,
+    StatusEffectUpdate, SystemNotice, UseItemIntent,
 };
 use shared::{
     ActionState, ArmorClass, BaseStats, Buffs, CharacterClass, CombatStats, Experience, Health,
@@ -896,10 +896,16 @@ pub fn broadcast_combat_events(
     network: Option<Res<ServerNetwork>>,
     mut damage_events: MessageReader<combat::CombatDamageEvent>,
     mut death_events: MessageReader<combat::CombatDeathEvent>,
+    mut penalty_events: MessageReader<combat::PlayerDeathPenaltyMessage>,
 ) {
     let Some(network) = network else {
         return;
     };
+
+    let mut penalty_by_player = HashMap::new();
+    for penalty in penalty_events.read() {
+        penalty_by_player.insert(penalty.player_id, penalty.exp_lost);
+    }
 
     for damage in damage_events.read() {
         let message = ServerMessage::DamageEvent(DamageEvent {
@@ -920,12 +926,40 @@ pub fn broadcast_combat_events(
     for death in death_events.read() {
         let message = ServerMessage::DeathEvent(shared::protocol::DeathEvent {
             target_id: death.target_id,
+            exp_lost: death
+                .exp_lost
+                .or_else(|| penalty_by_player.get(&death.target_id).copied()),
         });
         let Ok(payload) = encode_server_message(&message) else {
             continue;
         };
         for (&address, session) in &network.sessions {
             if session.logged_in {
+                let _ = network.socket.send_to(&payload, address);
+            }
+        }
+    }
+}
+
+pub fn broadcast_system_notices(
+    network: Option<Res<ServerNetwork>>,
+    mut notices: MessageReader<combat::SystemNoticeMessage>,
+) {
+    let Some(network) = network else {
+        return;
+    };
+
+    for notice in notices.read() {
+        let message = ServerMessage::SystemNotice(SystemNotice {
+            player_id: notice.player_id,
+            text: notice.text.clone(),
+        });
+        let Ok(payload) = encode_server_message(&message) else {
+            continue;
+        };
+
+        for (&address, session) in &network.sessions {
+            if session.logged_in && session.player_id == Some(notice.player_id) {
                 let _ = network.socket.send_to(&payload, address);
             }
         }

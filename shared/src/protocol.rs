@@ -109,6 +109,7 @@ pub enum ServerMessage {
     ChatEvent(ChatEvent),
     QuestUpdateEvent(QuestUpdateEvent),
     StatusEffectUpdate(StatusEffectUpdate),
+    SystemNotice(SystemNotice),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -157,6 +158,7 @@ pub struct DamageEvent {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct DeathEvent {
     pub target_id: u64,
+    pub exp_lost: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -252,6 +254,12 @@ pub struct QuestUpdateEvent {
 pub struct StatusEffectUpdate {
     pub player_id: u64,
     pub effects: Vec<StatusEffect>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemNotice {
+    pub player_id: u64,
+    pub text: String,
 }
 
 pub fn encode_client_message(message: &ClientMessage) -> Result<Vec<u8>, bincode::Error> {

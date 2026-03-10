@@ -68,7 +68,7 @@ pub fn item_modifier(item_type: ItemType) -> StatModifier {
         },
         ItemType::LeatherArmor => StatModifier {
             attack_power_bonus: 0,
-            armor_class_bonus: 6,
+            armor_class_bonus: 3,
         },
         _ => StatModifier::default(),
     }

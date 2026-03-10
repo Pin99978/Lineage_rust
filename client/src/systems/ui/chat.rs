@@ -166,6 +166,10 @@ pub fn push_history_line(chat_state: &mut ChatUiState, line: String) {
     }
 }
 
+pub fn push_system_line(chat_state: &mut ChatUiState, line: String) {
+    push_history_line(chat_state, format!("[System] {}", line));
+}
+
 fn parse_chat_command(raw: &str) -> (ChatChannel, Option<String>, String) {
     let trimmed = raw.trim();
     if let Some(rest) = trimmed

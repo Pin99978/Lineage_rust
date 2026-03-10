@@ -1,7 +1,8 @@
 use bevy::prelude::*;
 use shared::{
-    class_def, experience_required_for_level, ActionState, BaseStats, Buffs, CharacterClass,
-    CombatStats, EffectType, Experience, Health, Level, Mana, Position, StatusEffect,
+    class_def, experience_required_for_level, ActionState, ArmorClass, BaseStats, Buffs,
+    CharacterClass, CombatStats, EffectType, Experience, Health, Level, Mana, Position,
+    StatusEffect,
 };
 
 use crate::network;
@@ -24,6 +25,7 @@ pub struct CombatDeathEvent {
     pub target_entity: Entity,
     pub target_id: u64,
     pub killer_player_id: Option<u64>,
+    pub exp_lost: Option<u32>,
 }
 
 #[derive(Message, Debug, Clone)]
@@ -52,6 +54,18 @@ pub struct LevelUpMessage {
     pub mana_max: i32,
 }
 
+#[derive(Message, Debug, Clone)]
+pub struct SystemNoticeMessage {
+    pub player_id: u64,
+    pub text: String,
+}
+
+#[derive(Message, Debug, Clone, Copy)]
+pub struct PlayerDeathPenaltyMessage {
+    pub player_id: u64,
+    pub exp_lost: u32,
+}
+
 pub fn combat_system(
     mut attack_requests: MessageReader<AttackRequest>,
     mut damage_events: MessageWriter<CombatDamageEvent>,
@@ -68,6 +82,7 @@ pub fn combat_system(
     >,
     target_lookup: Query<(Entity, &network::NetworkEntity, &Position, Option<&Buffs>)>,
     mut target_health: Query<&mut Health>,
+    target_armor: Query<&ArmorClass>,
 ) {
     for request in attack_requests.read() {
         let Ok((attacker_position, combat_stats, mut action_state, attacker_buffs, attacker_net)) =
@@ -102,7 +117,16 @@ pub fn combat_system(
             continue;
         }
 
-        let damage = compute_damage(combat_stats.attack_power, attacker_buffs, target_buffs);
+        let target_ac = target_armor
+            .get(target_entity)
+            .map(|armor| armor.value)
+            .unwrap_or(0);
+        let damage = compute_damage(
+            combat_stats.attack_power,
+            target_ac,
+            attacker_buffs,
+            target_buffs,
+        );
         health.current = (health.current - damage).max(0);
 
         action_state.is_attacking = true;
@@ -118,6 +142,7 @@ pub fn combat_system(
                 target_entity,
                 target_id: request.target_id,
                 killer_player_id: Some(attacker_net.id),
+                exp_lost: None,
             });
         }
     }
@@ -166,6 +191,7 @@ pub fn update_status_effects_system(
                     target_entity: entity,
                     target_id: network_entity.id,
                     killer_player_id: None,
+                    exp_lost: None,
                 });
             }
         }
@@ -210,6 +236,7 @@ pub fn add_or_refresh_poison(buffs: &mut Buffs, duration_secs: f32, strength: f3
 
 fn compute_damage(
     base_attack: i32,
+    target_ac: i32,
     attacker_buffs: Option<&Buffs>,
     target_buffs: Option<&Buffs>,
 ) -> i32 {
@@ -233,7 +260,7 @@ fn compute_damage(
                 .sum::<i32>()
         })
         .unwrap_or(0);
-    (base_attack + attack_bonus + defense_down_bonus).max(1)
+    (base_attack + attack_bonus + defense_down_bonus - target_ac).max(1)
 }
 
 pub fn log_player_death_system(
@@ -332,6 +359,76 @@ pub fn experience_and_level_system(
 
         if !awarded {
             continue;
+        }
+    }
+}
+
+pub fn death_penalty_system(
+    mut death_events: MessageReader<CombatDeathEvent>,
+    mut players: Query<
+        (
+            &network::NetworkEntity,
+            &mut Level,
+            &mut Experience,
+            &BaseStats,
+            &mut Health,
+        ),
+        With<network::PlayerCharacter>,
+    >,
+    mut exp_events: MessageWriter<ExpChangedMessage>,
+    mut notice_events: MessageWriter<SystemNoticeMessage>,
+    mut penalty_events: MessageWriter<PlayerDeathPenaltyMessage>,
+) {
+    for death in death_events.read() {
+        let Ok((player_net, mut level, mut exp, base_stats, mut health)) =
+            players.get_mut(death.target_entity)
+        else {
+            continue;
+        };
+
+        let penalty = experience_required_for_level(level.current) / 10;
+        let mut leveled_down = false;
+
+        if exp.current >= penalty {
+            exp.current -= penalty;
+        } else if level.current > 1 {
+            let missing = penalty - exp.current;
+            level.current -= 1;
+            let prev_req = experience_required_for_level(level.current);
+            exp.next_level_req = prev_req.max(1);
+            exp.current = prev_req.saturating_sub(missing);
+            leveled_down = true;
+        } else {
+            exp.current = 0;
+            exp.next_level_req = experience_required_for_level(1);
+        }
+
+        health.current = (health.max / 2).max(1);
+
+        exp_events.write(ExpChangedMessage {
+            player_id: player_net.id,
+            level: level.current,
+            exp_current: exp.current,
+            exp_next: exp.next_level_req.max(1),
+            str_stat: base_stats.str_stat,
+            dex: base_stats.dex,
+            int_stat: base_stats.int_stat,
+            con: base_stats.con,
+        });
+
+        penalty_events.write(PlayerDeathPenaltyMessage {
+            player_id: player_net.id,
+            exp_lost: penalty,
+        });
+        notice_events.write(SystemNoticeMessage {
+            player_id: player_net.id,
+            text: format!("你死了！失去了 {} 點經驗值。", penalty),
+        });
+        if leveled_down {
+            notice_events.write(SystemNoticeMessage {
+                player_id: player_net.id,
+                text: format!("等級降低至 Lv.{}！", level.current),
+            });
         }
     }
 }

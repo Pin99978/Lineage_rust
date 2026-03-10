@@ -20,6 +20,8 @@ fn main() {
         .add_message::<systems::combat::CombatDeathEvent>()
         .add_message::<systems::combat::ExpChangedMessage>()
         .add_message::<systems::combat::LevelUpMessage>()
+        .add_message::<systems::combat::SystemNoticeMessage>()
+        .add_message::<systems::combat::PlayerDeathPenaltyMessage>()
         .add_message::<systems::drop::ItemSpawnedMessage>()
         .add_message::<systems::loot::LootRequest>()
         .add_message::<systems::loot::ItemDespawnedMessage>()
@@ -53,26 +55,31 @@ fn main() {
         .add_systems(
             Update,
             (
-                network::receive_client_messages,
-                network::cleanup_stale_sessions,
-                network::apply_db_results,
-                systems::movement::process_move_requests,
-                systems::spawner::spawner_system,
-                systems::ai::ai_aggro_system,
-                systems::ai::ai_chase_and_attack_system,
-                systems::movement::movement_system,
-                systems::combat::combat_system,
-                systems::combat::update_status_effects_system,
-                systems::combat::experience_and_level_system,
-                systems::spell::tick_spell_cooldowns,
-                systems::spell::cast_spell_system,
-                systems::item::use_item_system,
-                systems::interaction::interaction_system,
-                systems::interaction::portal_system,
-                systems::npc::convert_legacy_dialog_to_npc,
-                systems::npc::npc_dialogue_system,
-                systems::chat::chat_system,
-                systems::quest::track_enemy_kill_quest_system,
+                (
+                    network::receive_client_messages,
+                    network::cleanup_stale_sessions,
+                    network::apply_db_results,
+                    systems::movement::process_move_requests,
+                    systems::spawner::spawner_system,
+                    systems::ai::ai_aggro_system,
+                    systems::ai::ai_chase_and_attack_system,
+                    systems::movement::movement_system,
+                    systems::combat::combat_system,
+                    systems::combat::update_status_effects_system,
+                    systems::combat::experience_and_level_system,
+                ),
+                (
+                    systems::combat::death_penalty_system,
+                    systems::spell::tick_spell_cooldowns,
+                    systems::spell::cast_spell_system,
+                    systems::item::use_item_system,
+                    systems::interaction::interaction_system,
+                    systems::interaction::portal_system,
+                    systems::npc::convert_legacy_dialog_to_npc,
+                    systems::npc::npc_dialogue_system,
+                    systems::chat::chat_system,
+                    systems::quest::track_enemy_kill_quest_system,
+                ),
             )
                 .chain(),
         )
@@ -93,6 +100,7 @@ fn main() {
                 network::broadcast_map_change_events,
                 network::broadcast_world_state,
                 network::broadcast_combat_events,
+                network::broadcast_system_notices,
                 network::broadcast_item_events,
                 network::broadcast_spell_events,
                 network::broadcast_progression_events,

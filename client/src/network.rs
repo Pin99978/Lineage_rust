@@ -271,6 +271,14 @@ pub fn receive_server_state(
                 death_feedback.write(systems::combat_render::DeathVisualEvent {
                     target_id: event.target_id,
                 });
+                if local_player.id == Some(event.target_id) {
+                    if let Some(exp_lost) = event.exp_lost {
+                        systems::ui::chat::push_system_line(
+                            &mut chat_state,
+                            format!("你死了！失去了 {} 點經驗值。", exp_lost),
+                        );
+                    }
+                }
             }
             ServerMessage::ItemSpawnEvent(event) => {
                 spawn_or_update_item(
@@ -372,6 +380,11 @@ pub fn receive_server_state(
                     &mut chat_state,
                     format!("{} {}: {}", prefix, event.sender, event.message),
                 );
+            }
+            ServerMessage::SystemNotice(event) => {
+                if local_player.id == Some(event.player_id) {
+                    systems::ui::chat::push_system_line(&mut chat_state, event.text);
+                }
             }
             ServerMessage::StatusEffectUpdate(event) => {
                 if local_player.id == Some(event.player_id) {

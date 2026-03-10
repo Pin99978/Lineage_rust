@@ -255,6 +255,7 @@ pub fn ai_chase_and_attack_system(
                     target_entity: target_entity,
                     target_id: player_network.id,
                     killer_player_id: None,
+                    exp_lost: None,
                 });
             }
         } else {
