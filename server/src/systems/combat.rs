@@ -1,11 +1,11 @@
 use bevy::prelude::*;
 use shared::{
-    class_def, experience_required_for_level, ActionState, ArmorClass, BaseStats, Buffs,
-    CharacterClass, CombatStats, EffectType, Experience, Health, Level, Mana, Position,
-    StatusEffect,
+    class_def, experience_required_for_level, ActionState, Alignment, AlignmentStatus, ArmorClass,
+    BaseStats, Buffs, CharacterClass, CombatStats, EffectType, Experience, Health, Level, Mana,
+    Position, StatusEffect,
 };
 
-use crate::network;
+use crate::{network, systems::ai::GuardAi};
 
 #[derive(Message, Debug, Clone, Copy)]
 pub struct AttackRequest {
@@ -60,6 +60,12 @@ pub struct SystemNoticeMessage {
     pub text: String,
 }
 
+#[derive(Message, Debug, Clone)]
+pub struct PkNoticeMessage {
+    pub player_id: u64,
+    pub text: String,
+}
+
 #[derive(Message, Debug, Clone, Copy)]
 pub struct PlayerDeathPenaltyMessage {
     pub player_id: u64,
@@ -70,23 +76,27 @@ pub fn combat_system(
     mut attack_requests: MessageReader<AttackRequest>,
     mut damage_events: MessageWriter<CombatDamageEvent>,
     mut death_events: MessageWriter<CombatDeathEvent>,
-    mut attackers: Query<
-        (
-            &Position,
-            &CombatStats,
-            &mut ActionState,
-            Option<&Buffs>,
-            &network::NetworkEntity,
-        ),
-        With<network::PlayerCharacter>,
-    >,
+    mut attackers: Query<(
+        &Position,
+        &CombatStats,
+        &mut ActionState,
+        Option<&Buffs>,
+        &network::NetworkEntity,
+        Option<&network::PlayerCharacter>,
+    )>,
     target_lookup: Query<(Entity, &network::NetworkEntity, &Position, Option<&Buffs>)>,
     mut target_health: Query<&mut Health>,
     target_armor: Query<&ArmorClass>,
 ) {
     for request in attack_requests.read() {
-        let Ok((attacker_position, combat_stats, mut action_state, attacker_buffs, attacker_net)) =
-            attackers.get_mut(request.attacker_entity)
+        let Ok((
+            attacker_position,
+            combat_stats,
+            mut action_state,
+            attacker_buffs,
+            attacker_net,
+            attacker_player_marker,
+        )) = attackers.get_mut(request.attacker_entity)
         else {
             continue;
         };
@@ -98,6 +108,9 @@ pub fn combat_system(
         else {
             continue;
         };
+        if target_entity == request.attacker_entity {
+            continue;
+        }
 
         let distance = Vec2::new(
             target_position.x - attacker_position.x,
@@ -141,7 +154,7 @@ pub fn combat_system(
             death_events.write(CombatDeathEvent {
                 target_entity,
                 target_id: request.target_id,
-                killer_player_id: Some(attacker_net.id),
+                killer_player_id: attacker_player_marker.map(|_| attacker_net.id),
                 exp_lost: None,
             });
         }
@@ -276,7 +289,7 @@ pub fn log_player_death_system(
 
 pub fn experience_and_level_system(
     mut death_events: MessageReader<CombatDeathEvent>,
-    entities: Query<&network::NetworkEntity>,
+    entities: Query<(&network::NetworkEntity, Option<&GuardAi>)>,
     mut players: Query<
         (
             &network::NetworkEntity,
@@ -296,10 +309,10 @@ pub fn experience_and_level_system(
         let Some(killer_player_id) = death.killer_player_id else {
             continue;
         };
-        let Ok(dead_net) = entities.get(death.target_entity) else {
+        let Ok((dead_net, dead_guard)) = entities.get(death.target_entity) else {
             continue;
         };
-        if dead_net.kind != shared::protocol::NetworkEntityKind::Enemy {
+        if dead_net.kind != shared::protocol::NetworkEntityKind::Enemy || dead_guard.is_some() {
             continue;
         }
 
@@ -360,6 +373,61 @@ pub fn experience_and_level_system(
         if !awarded {
             continue;
         }
+    }
+}
+
+pub fn apply_pk_on_player_kill_system(
+    mut death_events: MessageReader<CombatDeathEvent>,
+    mut players: ParamSet<(
+        Query<(Entity, &network::NetworkEntity, &Alignment), With<network::PlayerCharacter>>,
+        Query<(&network::NetworkEntity, &mut Alignment), With<network::PlayerCharacter>>,
+    )>,
+    mut pk_notices: MessageWriter<PkNoticeMessage>,
+) {
+    for death in death_events.read() {
+        let Some(killer_player_id) = death.killer_player_id else {
+            continue;
+        };
+
+        let (victim_player_id, victim_was_lawful) = {
+            let players = players.p0();
+            let Ok((_, victim_net, victim_alignment)) = players.get(death.target_entity) else {
+                continue;
+            };
+            (
+                victim_net.id,
+                victim_alignment.status == AlignmentStatus::Lawful,
+            )
+        };
+
+        if !victim_was_lawful || victim_player_id == killer_player_id {
+            continue;
+        }
+
+        let killer_entity = {
+            let players = players.p0();
+            players
+                .iter()
+                .find_map(|(entity, net, _)| (net.id == killer_player_id).then_some(entity))
+        };
+
+        let Some(killer_entity) = killer_entity else {
+            continue;
+        };
+
+        let mut killer_players = players.p1();
+        let Ok((killer_net, mut killer_alignment)) = killer_players.get_mut(killer_entity) else {
+            continue;
+        };
+
+        killer_alignment.add_pk();
+        pk_notices.write(PkNoticeMessage {
+            player_id: killer_net.id,
+            text: format!(
+                "你擊殺了守序玩家 {}，PK 值上升至 {}。",
+                victim_player_id, killer_alignment.pk_count
+            ),
+        });
     }
 }
 
@@ -430,6 +498,15 @@ pub fn death_penalty_system(
                 text: format!("等級降低至 Lv.{}！", level.current),
             });
         }
+    }
+}
+
+pub fn pk_decay_system(
+    time: Res<Time>,
+    mut players: Query<&mut Alignment, With<network::PlayerCharacter>>,
+) {
+    for mut alignment in &mut players {
+        alignment.tick_decay(time.delta_secs());
     }
 }
 

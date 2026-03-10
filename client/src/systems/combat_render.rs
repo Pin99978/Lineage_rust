@@ -1,8 +1,7 @@
 use bevy::prelude::*;
 use shared::Health;
 
-use crate::network::{Attackable, NetworkEntityVisual};
-use crate::{systems, Player};
+use crate::network::{self, Attackable, NetworkEntityVisual};
 
 #[derive(Message, Debug, Clone, Copy)]
 pub struct DamagePopupEvent {
@@ -144,8 +143,6 @@ pub fn attach_world_health_bars(
 
 pub fn update_world_health_bars(
     mut commands: Commands,
-    hud_state: Option<Res<systems::ui::HudState>>,
-    players: Query<Entity, With<Player>>,
     health_query: Query<&Health>,
     mut fill_bars: Query<
         (
@@ -157,6 +154,7 @@ pub fn update_world_health_bars(
         Without<WorldHealthBarBackground>,
     >,
     mut bg_bars: Query<(&WorldHealthBarBackground, &mut Visibility), Without<WorldHealthBarFill>>,
+    player_guilds: Query<(Entity, &network::EntityGuildName), With<network::PlayerVisual>>,
     guild_tags: Query<(Entity, &PlayerGuildTag)>,
 ) {
     for (fill, mut sprite, mut transform, mut visibility) in &mut fill_bars {
@@ -191,39 +189,34 @@ pub fn update_world_health_bars(
         }
     }
 
-    let Some(hud_state) = hud_state else {
-        return;
-    };
-    let Ok(player_entity) = players.single() else {
-        return;
-    };
+    for (player_entity, guild_name) in &player_guilds {
+        let existing_tag = guild_tags
+            .iter()
+            .find_map(|(tag_entity, tag)| (tag.parent == player_entity).then_some(tag_entity));
 
-    let existing_tag = guild_tags
-        .iter()
-        .find_map(|(tag_entity, tag)| (tag.parent == player_entity).then_some(tag_entity));
-
-    if let Some(guild_name) = hud_state.guild_name.as_ref() {
-        let label = format!("<{}>", guild_name);
-        if let Some(tag_entity) = existing_tag {
-            commands.entity(tag_entity).insert(Text2d::new(label));
-        } else {
-            let tag_entity = commands
-                .spawn((
-                    Text2d::new(label),
-                    TextFont {
-                        font_size: 14.0,
-                        ..Default::default()
-                    },
-                    TextColor(Color::srgb(0.9, 0.95, 1.0)),
-                    Transform::from_xyz(0.0, 44.0, 0.35),
-                    PlayerGuildTag {
-                        parent: player_entity,
-                    },
-                ))
-                .id();
-            commands.entity(player_entity).add_child(tag_entity);
+        if let Some(guild_name) = guild_name.0.as_ref() {
+            let label = format!("<{}>", guild_name);
+            if let Some(tag_entity) = existing_tag {
+                commands.entity(tag_entity).insert(Text2d::new(label));
+            } else {
+                let tag_entity = commands
+                    .spawn((
+                        Text2d::new(label),
+                        TextFont {
+                            font_size: 14.0,
+                            ..Default::default()
+                        },
+                        TextColor(Color::srgb(0.9, 0.95, 1.0)),
+                        Transform::from_xyz(0.0, 44.0, 0.35),
+                        PlayerGuildTag {
+                            parent: player_entity,
+                        },
+                    ))
+                    .id();
+                commands.entity(player_entity).add_child(tag_entity);
+            }
+        } else if let Some(tag_entity) = existing_tag {
+            commands.entity(tag_entity).despawn();
         }
-    } else if let Some(tag_entity) = existing_tag {
-        commands.entity(tag_entity).despawn();
     }
 }

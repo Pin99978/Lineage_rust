@@ -283,6 +283,65 @@ impl KnownSpells {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect, Serialize, Deserialize, Default)]
+pub enum AlignmentStatus {
+    #[default]
+    Lawful,
+    Chaotic,
+}
+
+#[derive(Component, Debug, Clone, Copy, Reflect)]
+#[reflect(Component, Default)]
+pub struct Alignment {
+    pub status: AlignmentStatus,
+    pub pk_count: u32,
+    pub decay_timer: f32,
+}
+
+impl Default for Alignment {
+    fn default() -> Self {
+        Self {
+            status: AlignmentStatus::Lawful,
+            pk_count: 0,
+            decay_timer: 600.0,
+        }
+    }
+}
+
+impl Alignment {
+    pub fn add_pk(&mut self) {
+        self.pk_count = self.pk_count.saturating_add(1);
+        self.status = AlignmentStatus::Chaotic;
+    }
+
+    pub fn tick_decay(&mut self, delta_secs: f32) {
+        if self.pk_count == 0 {
+            self.status = AlignmentStatus::Lawful;
+            self.decay_timer = 600.0;
+            return;
+        }
+
+        self.decay_timer -= delta_secs;
+        if self.decay_timer > 0.0 {
+            return;
+        }
+
+        self.pk_count = self.pk_count.saturating_sub(1);
+        self.decay_timer = 600.0;
+        if self.pk_count == 0 {
+            self.status = AlignmentStatus::Lawful;
+        } else {
+            self.status = AlignmentStatus::Chaotic;
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.pk_count = 0;
+        self.status = AlignmentStatus::Lawful;
+        self.decay_timer = 600.0;
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Reflect, Default)]
 pub enum EffectType {
     #[default]

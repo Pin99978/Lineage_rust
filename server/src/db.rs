@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use shared::{
-    class_def, BaseStats, CharacterClass, EquipmentMap, Experience, GuildMembership, GuildRole,
-    Inventory, KnownSpells, Level, QuestTracker, SpellType,
+    class_def, Alignment, BaseStats, CharacterClass, EquipmentMap, Experience, GuildMembership,
+    GuildRole, Inventory, KnownSpells, Level, QuestTracker, SpellType,
 };
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use std::collections::HashMap;
@@ -122,8 +122,8 @@ pub fn setup_db(mut commands: Commands) {
     let (command_tx, command_rx) = unbounded::<DbCommand>();
     let (result_tx, result_rx) = unbounded::<DbResult>();
 
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| DEFAULT_DATABASE_URL.to_string());
+    let database_url =
+        std::env::var("DATABASE_URL").unwrap_or_else(|_| DEFAULT_DATABASE_URL.to_string());
 
     thread::spawn(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -170,64 +170,62 @@ async fn db_worker_loop(
                 address,
                 username,
                 class,
-            } => {
-                match load_player(&pool, &username).await {
-                    Ok(Some(player)) => {
-                        let _ = result_tx.send(DbResult::PlayerLoaded {
-                            address,
-                            data: player,
-                        });
-                    }
-                    Ok(None) => {
-                        let definition = class_def(class);
-                        let new_player = PersistedPlayer {
-                            username: username.clone(),
-                            class,
-                            guild_name: None,
-                            guild_role: None,
-                            known_spells: initial_known_spells_for_class(class),
-                            pk_count: 0,
-                            x: -300.0,
-                            y: 0.0,
-                            health_current: definition.base_hp,
-                            health_max: definition.base_hp,
-                            mana_current: definition.base_mp,
-                            mana_max: definition.base_mp,
-                            level: 1,
-                            exp_current: 0,
-                            exp_next: shared::experience_required_for_level(1),
-                            base_stats: BaseStats {
-                                str_stat: definition.base_str,
-                                dex: definition.base_dex,
-                                int_stat: definition.base_int,
-                                con: definition.base_con,
-                            },
-                            inventory: Inventory::default(),
-                            equipment: EquipmentMap::default(),
-                            quests: QuestTracker::default(),
-                        };
+            } => match load_player(&pool, &username).await {
+                Ok(Some(player)) => {
+                    let _ = result_tx.send(DbResult::PlayerLoaded {
+                        address,
+                        data: player,
+                    });
+                }
+                Ok(None) => {
+                    let definition = class_def(class);
+                    let new_player = PersistedPlayer {
+                        username: username.clone(),
+                        class,
+                        guild_name: None,
+                        guild_role: None,
+                        known_spells: initial_known_spells_for_class(class),
+                        pk_count: 0,
+                        x: -300.0,
+                        y: 0.0,
+                        health_current: definition.base_hp,
+                        health_max: definition.base_hp,
+                        mana_current: definition.base_mp,
+                        mana_max: definition.base_mp,
+                        level: 1,
+                        exp_current: 0,
+                        exp_next: shared::experience_required_for_level(1),
+                        base_stats: BaseStats {
+                            str_stat: definition.base_str,
+                            dex: definition.base_dex,
+                            int_stat: definition.base_int,
+                            con: definition.base_con,
+                        },
+                        inventory: Inventory::default(),
+                        equipment: EquipmentMap::default(),
+                        quests: QuestTracker::default(),
+                    };
 
-                        if let Err(error) = save_player(&pool, &new_player).await {
-                            let _ = result_tx.send(DbResult::LoginFailed {
-                                address,
-                                message: format!("create account failed: {}", error),
-                            });
-                            continue;
-                        }
-
-                        let _ = result_tx.send(DbResult::PlayerLoaded {
-                            address,
-                            data: new_player,
-                        });
-                    }
-                    Err(error) => {
+                    if let Err(error) = save_player(&pool, &new_player).await {
                         let _ = result_tx.send(DbResult::LoginFailed {
                             address,
-                            message: error,
+                            message: format!("create account failed: {}", error),
                         });
+                        continue;
                     }
+
+                    let _ = result_tx.send(DbResult::PlayerLoaded {
+                        address,
+                        data: new_player,
+                    });
                 }
-            }
+                Err(error) => {
+                    let _ = result_tx.send(DbResult::LoginFailed {
+                        address,
+                        message: error,
+                    });
+                }
+            },
             DbCommand::SavePlayer { data } => {
                 if let Err(error) = save_player(&pool, &data).await {
                     let _ = result_tx.send(DbResult::SaveError {
@@ -275,19 +273,17 @@ async fn db_worker_loop(
                     let _ = result_tx.send(DbResult::GuildOpError { username, message });
                 }
             },
-            DbCommand::DisbandGuild { username } => {
-                match disband_guild(&pool, &username).await {
-                    Ok(guild_name) => {
-                        let _ = result_tx.send(DbResult::GuildDisbanded {
-                            username,
-                            guild_name,
-                        });
-                    }
-                    Err(message) => {
-                        let _ = result_tx.send(DbResult::GuildOpError { username, message });
-                    }
+            DbCommand::DisbandGuild { username } => match disband_guild(&pool, &username).await {
+                Ok(guild_name) => {
+                    let _ = result_tx.send(DbResult::GuildDisbanded {
+                        username,
+                        guild_name,
+                    });
                 }
-            }
+                Err(message) => {
+                    let _ = result_tx.send(DbResult::GuildOpError { username, message });
+                }
+            },
             DbCommand::QueryGuildMembers { username } => {
                 let (guild_name, members) = query_guild_members(&pool, &username).await;
                 let _ = result_tx.send(DbResult::GuildMembers {
@@ -400,35 +396,14 @@ async fn load_player(pool: &PgPool, username: &str) -> Result<Option<PersistedPl
         mana_max: row
             .try_get("mana_max")
             .map_err(|error| format!("read mana_max failed: {}", error))?,
-        level: row
-            .try_get::<i32, _>("level")
-            .unwrap_or(1)
-            .max(1) as u32,
-        exp_current: row
-            .try_get::<i32, _>("exp_current")
-            .unwrap_or(0)
-            .max(0) as u32,
-        exp_next: row
-            .try_get::<i32, _>("exp_next")
-            .unwrap_or(1)
-            .max(1) as u32,
+        level: row.try_get::<i32, _>("level").unwrap_or(1).max(1) as u32,
+        exp_current: row.try_get::<i32, _>("exp_current").unwrap_or(0).max(0) as u32,
+        exp_next: row.try_get::<i32, _>("exp_next").unwrap_or(1).max(1) as u32,
         base_stats: BaseStats {
-            str_stat: row
-                .try_get::<i32, _>("str_stat")
-                .unwrap_or(15)
-                .max(1) as u32,
-            dex: row
-                .try_get::<i32, _>("dex")
-                .unwrap_or(15)
-                .max(1) as u32,
-            int_stat: row
-                .try_get::<i32, _>("int_stat")
-                .unwrap_or(15)
-                .max(1) as u32,
-            con: row
-                .try_get::<i32, _>("con")
-                .unwrap_or(15)
-                .max(1) as u32,
+            str_stat: row.try_get::<i32, _>("str_stat").unwrap_or(15).max(1) as u32,
+            dex: row.try_get::<i32, _>("dex").unwrap_or(15).max(1) as u32,
+            int_stat: row.try_get::<i32, _>("int_stat").unwrap_or(15).max(1) as u32,
+            con: row.try_get::<i32, _>("con").unwrap_or(15).max(1) as u32,
         },
         inventory: Inventory {
             items: inventory_items,
@@ -441,7 +416,8 @@ async fn load_player(pool: &PgPool, username: &str) -> Result<Option<PersistedPl
 async fn save_player(pool: &PgPool, data: &PersistedPlayer) -> Result<(), String> {
     let inventory_json =
         serde_json::to_value(&data.inventory.items).map_err(|error| error.to_string())?;
-    let equipment_json = serde_json::to_value(&data.equipment).map_err(|error| error.to_string())?;
+    let equipment_json =
+        serde_json::to_value(&data.equipment).map_err(|error| error.to_string())?;
     let known_spells_json =
         serde_json::to_value(&data.known_spells.spells).map_err(|error| error.to_string())?;
 
@@ -531,12 +507,10 @@ async fn save_player(pool: &PgPool, data: &PersistedPlayer) -> Result<(), String
 }
 
 async fn load_quests(pool: &PgPool, username: &str) -> QuestTracker {
-    let rows = match sqlx::query(
-        "SELECT quest_id, status_json FROM quests WHERE username = $1",
-    )
-    .bind(username)
-    .fetch_all(pool)
-    .await
+    let rows = match sqlx::query("SELECT quest_id, status_json FROM quests WHERE username = $1")
+        .bind(username)
+        .fetch_all(pool)
+        .await
     {
         Ok(rows) => rows,
         Err(_) => return QuestTracker::default(),
@@ -554,12 +528,13 @@ async fn load_quests(pool: &PgPool, username: &str) -> QuestTracker {
         let status_json = row
             .try_get::<serde_json::Value, _>("status_json")
             .unwrap_or_else(|_| serde_json::json!(shared::QuestStatus::NotStarted));
-        let status =
-            serde_json::from_value::<shared::QuestStatus>(status_json).unwrap_or(shared::QuestStatus::NotStarted);
+        let status = serde_json::from_value::<shared::QuestStatus>(status_json)
+            .unwrap_or(shared::QuestStatus::NotStarted);
 
-        tracker
-            .active_quests
-            .push(shared::QuestEntry { id: quest_id, status });
+        tracker.active_quests.push(shared::QuestEntry {
+            id: quest_id,
+            status,
+        });
     }
 
     tracker
@@ -855,6 +830,7 @@ pub fn periodic_save_players(
         &BaseStats,
         &CharacterClass,
         Option<&GuildMembership>,
+        Option<&Alignment>,
         Option<&KnownSpells>,
         &Inventory,
         &EquipmentMap,
@@ -892,6 +868,7 @@ pub fn periodic_save_players(
             base_stats,
             class,
             guild,
+            alignment,
             known_spells,
             inventory,
             equipment,
@@ -906,7 +883,7 @@ pub fn periodic_save_players(
             guild_name: guild.map(|value| value.guild_name.clone()),
             guild_role: guild.map(|value| value.role),
             known_spells: known_spells.cloned().unwrap_or_default(),
-            pk_count: 0,
+            pk_count: alignment.map(|value| value.pk_count).unwrap_or(0),
             x: position.x,
             y: position.y,
             health_current: health.current,
@@ -939,6 +916,7 @@ pub fn save_player_progress_on_change(
             &BaseStats,
             &CharacterClass,
             Option<&GuildMembership>,
+            Option<&Alignment>,
             Option<&KnownSpells>,
             &Inventory,
             &EquipmentMap,
@@ -953,6 +931,7 @@ pub fn save_player_progress_on_change(
             Changed<BaseStats>,
             Changed<CharacterClass>,
             Changed<GuildMembership>,
+            Changed<Alignment>,
             Changed<KnownSpells>,
             Changed<Inventory>,
             Changed<EquipmentMap>,
@@ -982,6 +961,7 @@ pub fn save_player_progress_on_change(
             base_stats,
             class,
             guild,
+            alignment,
             known_spells,
             inventory,
             equipment,
@@ -997,7 +977,7 @@ pub fn save_player_progress_on_change(
                 guild_name: guild.map(|value| value.guild_name.clone()),
                 guild_role: guild.map(|value| value.role),
                 known_spells: known_spells.cloned().unwrap_or_default(),
-                pk_count: 0,
+                pk_count: alignment.map(|value| value.pk_count).unwrap_or(0),
                 x: position.x,
                 y: position.y,
                 health_current: health.current,

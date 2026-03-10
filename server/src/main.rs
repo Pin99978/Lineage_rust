@@ -21,6 +21,7 @@ fn main() {
         .add_message::<systems::combat::ExpChangedMessage>()
         .add_message::<systems::combat::LevelUpMessage>()
         .add_message::<systems::combat::SystemNoticeMessage>()
+        .add_message::<systems::combat::PkNoticeMessage>()
         .add_message::<systems::combat::PlayerDeathPenaltyMessage>()
         .add_message::<systems::drop::ItemSpawnedMessage>()
         .add_message::<systems::loot::LootRequest>()
@@ -77,10 +78,13 @@ fn main() {
             Update,
             (
                 systems::ai::ai_chase_and_attack_system,
+                systems::ai::guard_ai_system,
                 systems::movement::movement_system,
                 systems::combat::combat_system,
                 systems::combat::update_status_effects_system,
                 systems::combat::experience_and_level_system,
+                systems::combat::apply_pk_on_player_kill_system,
+                systems::combat::pk_decay_system,
             ),
         )
         .add_systems(
@@ -126,6 +130,7 @@ fn main() {
                 network::broadcast_world_state,
                 network::broadcast_combat_events,
                 network::broadcast_system_notices,
+                network::broadcast_pk_notices,
                 network::broadcast_guild_events,
                 network::broadcast_item_events,
                 network::broadcast_spell_events,

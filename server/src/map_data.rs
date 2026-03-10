@@ -1,11 +1,14 @@
 use bevy::prelude::*;
 use shared::{
-    MapId, Npc, NpcMarker, NpcType, Portal, Position, SpawnType, Spawner, TargetPosition,
-    MAP_DUNGEON_1, MAP_TOWN,
+    AggroRange, AttackCooldown, Buffs, CombatStats, Health, MapId, MoveSpeed, Npc, NpcMarker,
+    NpcType, Portal, Position, SpawnType, Spawner, TargetPosition, MAP_DUNGEON_1, MAP_TOWN,
 };
 use std::collections::HashMap;
 
-use crate::network;
+use crate::{
+    network,
+    systems::ai::{GuardAi, GuardRespawnTimer},
+};
 
 #[derive(Resource, Debug, Clone)]
 pub struct CollisionGrid {
@@ -171,6 +174,36 @@ pub fn setup_world_map(mut commands: Commands, network: Option<ResMut<network::S
         Position { x: 0.0, y: 0.0 },
         TargetPosition { x: 0.0, y: 0.0 },
     ));
+
+    // Town guards that hunt chaotic players.
+    let guard_positions = [(100.0, 150.0), (-100.0, 150.0), (0.0, -200.0)];
+    for (x, y) in guard_positions {
+        let guard_id = network.allocate_entity_id();
+        commands.spawn((
+            GuardAi,
+            GuardRespawnTimer::new(Vec2::new(x, y)),
+            network::NetworkEntity {
+                id: guard_id,
+                kind: shared::protocol::NetworkEntityKind::Enemy,
+            },
+            MapId(MAP_TOWN.to_string()),
+            Position { x, y },
+            TargetPosition { x, y },
+            MoveSpeed { value: 260.0 },
+            Health {
+                current: 300,
+                max: 300,
+            },
+            Buffs::default(),
+            CombatStats {
+                attack_power: 40,
+                attack_range: 80.0,
+                attack_speed: 1.5,
+            },
+            AggroRange(600.0),
+            AttackCooldown::default(),
+        ));
+    }
 
     // World spawners (Town + Dungeon1).
     let configs = [

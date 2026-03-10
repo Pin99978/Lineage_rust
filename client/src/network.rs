@@ -5,7 +5,9 @@ use shared::protocol::{
     InteractNpcIntent, InviteToGuildIntent, LeaveGuildIntent, LoginRequest, LootIntent,
     NetworkEntityKind, RespondToGuildInvite, ServerMessage, UnequipIntent, UseItemIntent,
 };
-use shared::{CharacterClass, EquipmentSlot, Health, ItemType, Position, SpellType, MAP_TOWN};
+use shared::{
+    AlignmentStatus, CharacterClass, EquipmentSlot, Health, ItemType, Position, SpellType, MAP_TOWN,
+};
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 
@@ -44,6 +46,16 @@ pub struct Lootable;
 
 #[derive(Component)]
 pub struct NpcInteractable;
+
+#[derive(Component, Debug, Clone, Copy)]
+#[allow(dead_code)]
+pub struct EntityAlignment(pub AlignmentStatus);
+
+#[derive(Component, Debug, Clone, Default)]
+pub struct EntityGuildName(pub Option<String>);
+
+#[derive(Component)]
+pub struct PlayerVisual;
 
 pub fn setup_network(mut commands: Commands) {
     let Ok(server_addr) = SERVER_ADDR.parse() else {
@@ -228,9 +240,12 @@ pub fn receive_server_state(
                         commands.entity(existing).despawn();
                     }
                 }
-                commands
-                    .entity(player_entity)
-                    .insert(NetworkEntityVisual { id: player_id });
+                commands.entity(player_entity).insert((
+                    NetworkEntityVisual { id: player_id },
+                    PlayerVisual,
+                    EntityAlignment(AlignmentStatus::Lawful),
+                    EntityGuildName(None),
+                ));
                 entity_map.entity_by_id.insert(player_id, player_entity);
             }
             ServerMessage::EntityState(state) => {
@@ -404,6 +419,14 @@ pub fn receive_server_state(
                     systems::ui::chat::push_system_line(&mut chat_state, event.text);
                 }
             }
+            ServerMessage::PkNotice(event) => {
+                if local_player.id == Some(event.player_id) {
+                    systems::ui::chat::push_system_line(
+                        &mut chat_state,
+                        format!("[PK] {}", event.text),
+                    );
+                }
+            }
             ServerMessage::GuildUpdateEvent(event) => {
                 if local_player.id == Some(event.player_id) {
                     hud_state.guild_name = event.guild_name;
@@ -478,7 +501,7 @@ fn apply_entity_state(
 ) {
     if local_player.id == Some(state.entity_id) {
         let mut player_query = state_queries.p0();
-        let Ok((player_entity, mut position, mut health, _sprite)) = player_query.single_mut()
+        let Ok((player_entity, mut position, mut health, sprite)) = player_query.single_mut()
         else {
             return;
         };
@@ -486,6 +509,14 @@ fn apply_entity_state(
         position.y = state.y;
         health.current = state.health_current;
         health.max = state.health_max;
+        if let Some(mut sprite) = sprite {
+            sprite.color = color_for_entity(state.kind, state.alignment);
+        }
+        commands.entity(player_entity).insert((
+            PlayerVisual,
+            EntityAlignment(state.alignment),
+            EntityGuildName(state.guild_name.clone()),
+        ));
         entity_map
             .entity_by_id
             .insert(state.entity_id, player_entity);
@@ -510,13 +541,39 @@ fn apply_entity_state(
 
     if let Some(existing_entity) = entity_map.entity_by_id.get(&state.entity_id).copied() {
         let mut visuals_query = state_queries.p1();
-        if let Ok((_, _, mut position, mut health, _sprite, _, _, _)) =
+        if let Ok((_, _, mut position, mut health, sprite, _, _, _)) =
             visuals_query.get_mut(existing_entity)
         {
             position.x = state.x;
             position.y = state.y;
             health.current = state.health_current;
             health.max = state.health_max;
+            if let Some(mut sprite) = sprite {
+                sprite.color = color_for_entity(state.kind, state.alignment);
+            }
+            let mut entity_commands = commands.entity(existing_entity);
+            entity_commands.insert((
+                EntityAlignment(state.alignment),
+                EntityGuildName(state.guild_name.clone()),
+            ));
+            if matches!(
+                state.kind,
+                NetworkEntityKind::Enemy | NetworkEntityKind::Player
+            ) {
+                entity_commands.insert(Attackable);
+            } else {
+                entity_commands.remove::<Attackable>();
+            }
+            if state.kind == NetworkEntityKind::NpcMerchant {
+                entity_commands.insert(NpcInteractable);
+            } else {
+                entity_commands.remove::<NpcInteractable>();
+            }
+            if state.kind == NetworkEntityKind::Player {
+                entity_commands.insert(PlayerVisual);
+            } else {
+                entity_commands.remove::<PlayerVisual>();
+            }
             return;
         }
         warn!(
@@ -539,15 +596,24 @@ fn apply_entity_state(
             max: state.health_max,
         },
         Sprite::from_color(
-            systems::render::color_for_network_kind(state.kind),
+            color_for_entity(state.kind, state.alignment),
             Vec2::splat(32.0),
         ),
         Transform::from_xyz(state.x, state.y, 0.0),
+        EntityAlignment(state.alignment),
+        EntityGuildName(state.guild_name.clone()),
     ));
-    if state.kind == NetworkEntityKind::Enemy {
+    if matches!(
+        state.kind,
+        NetworkEntityKind::Enemy | NetworkEntityKind::Player
+    ) {
         entity_commands.insert(Attackable);
-    } else if state.kind == NetworkEntityKind::NpcMerchant {
+    }
+    if state.kind == NetworkEntityKind::NpcMerchant {
         entity_commands.insert(NpcInteractable);
+    }
+    if state.kind == NetworkEntityKind::Player {
+        entity_commands.insert(PlayerVisual);
     }
     let spawned = entity_commands.id();
     entity_map.entity_by_id.insert(state.entity_id, spawned);
@@ -660,6 +726,16 @@ fn spell_label(spell: SpellType) -> &'static str {
         SpellType::PoisonArrow => "Poison Arrow",
         SpellType::Bless => "Bless",
     }
+}
+
+fn color_for_entity(kind: NetworkEntityKind, alignment: AlignmentStatus) -> Color {
+    if kind == NetworkEntityKind::Player {
+        return match alignment {
+            AlignmentStatus::Lawful => Color::WHITE,
+            AlignmentStatus::Chaotic => Color::srgb(1.0, 0.2, 0.2),
+        };
+    }
+    systems::render::color_for_network_kind(kind)
 }
 
 fn clear_map_state(

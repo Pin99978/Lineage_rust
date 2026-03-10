@@ -3,13 +3,13 @@ use shared::protocol::{
     decode_client_message, encode_server_message, AttackIntent, ChatIntent, ClientMessage,
     DamageEvent, EntityState, EquipmentUpdate, GuildActionError, GuildInviteEvent,
     GuildUpdateEvent, InventoryUpdate, ItemDespawnEvent, ItemSpawnEvent, LoginRequest,
-    LoginResponse, LootIntent, ManaUpdate, NetworkEntityKind, ServerMessage, StatusEffectUpdate,
-    SystemNotice, UseItemIntent,
+    LoginResponse, LootIntent, ManaUpdate, NetworkEntityKind, PkNotice, ServerMessage,
+    StatusEffectUpdate, SystemNotice, UseItemIntent,
 };
 use shared::{
-    ActionState, ArmorClass, BaseStats, Buffs, CharacterClass, CombatStats, Experience,
-    GuildMembership, GuildRole, Health, KnownSpells, Level, Mana, MapId, MoveSpeed, PathQueue,
-    Position, SpellCooldowns, TargetPosition, MAP_TOWN,
+    ActionState, Alignment, AlignmentStatus, ArmorClass, BaseStats, Buffs, CharacterClass,
+    CombatStats, Experience, GuildMembership, GuildRole, Health, KnownSpells, Level, Mana, MapId,
+    MoveSpeed, PathQueue, Position, SpellCooldowns, TargetPosition, MAP_TOWN,
 };
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
@@ -103,6 +103,7 @@ pub fn receive_client_messages(
         &CharacterClass,
         Option<&GuildMembership>,
         Option<&KnownSpells>,
+        Option<&Alignment>,
         &shared::Inventory,
         &shared::EquipmentMap,
         &Buffs,
@@ -170,6 +171,7 @@ pub fn receive_client_messages(
                                 player_class,
                                 guild_membership,
                                 known_spells,
+                                alignment,
                                 inventory,
                                 equipment,
                                 _buffs,
@@ -194,7 +196,9 @@ pub fn receive_client_messages(
                                             .map(|value| value.guild_name.clone()),
                                         guild_role: guild_membership.map(|value| value.role),
                                         known_spells: known_spells.cloned().unwrap_or_default(),
-                                        pk_count: 0,
+                                        pk_count: alignment
+                                            .map(|value| value.pk_count)
+                                            .unwrap_or(0),
                                         inventory: inventory.clone(),
                                         equipment: equipment.clone(),
                                         quests: quests.clone(),
@@ -421,10 +425,12 @@ pub fn receive_client_messages(
                     continue;
                 }
                 if let Some(player_entity) = session.entity {
-                    guild_requests.p2().write(guild::RespondToGuildInviteRequest {
-                        player_entity,
-                        accepted: intent.accepted,
-                    });
+                    guild_requests
+                        .p2()
+                        .write(guild::RespondToGuildInviteRequest {
+                            player_entity,
+                            accepted: intent.accepted,
+                        });
                 }
             }
             ClientMessage::LeaveGuildIntent(_) => {
@@ -473,6 +479,7 @@ fn handle_login_request(
         &CharacterClass,
         Option<&GuildMembership>,
         Option<&KnownSpells>,
+        Option<&Alignment>,
         &shared::Inventory,
         &shared::EquipmentMap,
         &Buffs,
@@ -597,6 +604,7 @@ fn send_player_snapshot(
         &CharacterClass,
         Option<&GuildMembership>,
         Option<&KnownSpells>,
+        Option<&Alignment>,
         &shared::Inventory,
         &shared::EquipmentMap,
         &Buffs,
@@ -613,6 +621,7 @@ fn send_player_snapshot(
         _class,
         _guild,
         known_spells,
+        _alignment,
         inventory,
         equipment,
         buffs,
@@ -710,6 +719,7 @@ pub fn cleanup_stale_sessions(
         &CharacterClass,
         Option<&GuildMembership>,
         Option<&KnownSpells>,
+        Option<&Alignment>,
         &shared::Inventory,
         &shared::EquipmentMap,
         &shared::QuestTracker,
@@ -744,6 +754,7 @@ pub fn cleanup_stale_sessions(
                     player_class,
                     guild_membership,
                     known_spells,
+                    alignment,
                     inventory,
                     equipment,
                     quests,
@@ -766,7 +777,7 @@ pub fn cleanup_stale_sessions(
                             guild_name: guild_membership.map(|value| value.guild_name.clone()),
                             guild_role: guild_membership.map(|value| value.role),
                             known_spells: known_spells.cloned().unwrap_or_default(),
-                            pk_count: 0,
+                            pk_count: alignment.map(|value| value.pk_count).unwrap_or(0),
                             inventory: inventory.clone(),
                             equipment: equipment.clone(),
                             quests: quests.clone(),
@@ -863,6 +874,15 @@ pub fn apply_db_results(
                 player_commands.insert(data.base_stats);
                 player_commands.insert(data.class);
                 player_commands.insert(data.known_spells.clone());
+                player_commands.insert(Alignment {
+                    status: if data.pk_count > 0 {
+                        AlignmentStatus::Chaotic
+                    } else {
+                        AlignmentStatus::Lawful
+                    },
+                    pk_count: data.pk_count,
+                    decay_timer: 600.0,
+                });
                 if let Some(guild_name) = data.guild_name.clone() {
                     player_commands.insert(GuildMembership {
                         guild_name,
@@ -1177,6 +1197,7 @@ pub fn broadcast_world_state(
         &Position,
         Option<&Health>,
         Option<&CharacterClass>,
+        Option<&Alignment>,
         Option<&GuildMembership>,
         Option<&PlayerCharacter>,
     )>,
@@ -1192,10 +1213,11 @@ pub fn broadcast_world_state(
         let Some(player_entity) = session.entity else {
             continue;
         };
-        let Ok((_, player_map, _, _, _, _, _)) = entities.get(player_entity) else {
+        let Ok((_, player_map, _, _, _, _, _, _)) = entities.get(player_entity) else {
             continue;
         };
-        for (network_entity, entity_map, position, health, class, guild, _) in &entities {
+        for (network_entity, entity_map, position, health, class, alignment, guild, _) in &entities
+        {
             if entity_map.0 != player_map.0 {
                 continue;
             }
@@ -1208,6 +1230,9 @@ pub fn broadcast_world_state(
                 entity_id: network_entity.id,
                 kind: network_entity.kind,
                 class: class.copied().unwrap_or_default(),
+                alignment: alignment
+                    .map(|value| value.status)
+                    .unwrap_or(AlignmentStatus::Lawful),
                 guild_name: guild.map(|value| value.guild_name.clone()),
                 map_id: entity_map.0.clone(),
                 x: position.x,
@@ -1283,6 +1308,31 @@ pub fn broadcast_system_notices(
 
     for notice in notices.read() {
         let message = ServerMessage::SystemNotice(SystemNotice {
+            player_id: notice.player_id,
+            text: notice.text.clone(),
+        });
+        let Ok(payload) = encode_server_message(&message) else {
+            continue;
+        };
+
+        for (&address, session) in &network.sessions {
+            if session.logged_in && session.player_id == Some(notice.player_id) {
+                let _ = network.socket.send_to(&payload, address);
+            }
+        }
+    }
+}
+
+pub fn broadcast_pk_notices(
+    network: Option<Res<ServerNetwork>>,
+    mut notices: MessageReader<combat::PkNoticeMessage>,
+) {
+    let Some(network) = network else {
+        return;
+    };
+
+    for notice in notices.read() {
+        let message = ServerMessage::PkNotice(PkNotice {
             player_id: notice.player_id,
             text: notice.text.clone(),
         });

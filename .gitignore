@@ -1,4 +1,5 @@
 /target
 .agents/
 .agent/
+.claude/
 data.db

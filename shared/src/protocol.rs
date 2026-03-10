@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    CharacterClass, EquipmentMap, EquipmentSlot, GuildRole, ItemType, QuestId, QuestStatus,
-    SpellType, StatusEffect,
+    AlignmentStatus, CharacterClass, EquipmentMap, EquipmentSlot, GuildRole, ItemType, QuestId,
+    QuestStatus, SpellType, StatusEffect,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -138,6 +138,7 @@ pub enum ServerMessage {
     QuestUpdateEvent(QuestUpdateEvent),
     StatusEffectUpdate(StatusEffectUpdate),
     SystemNotice(SystemNotice),
+    PkNotice(PkNotice),
     GuildUpdateEvent(GuildUpdateEvent),
     GuildInviteEvent(GuildInviteEvent),
     GuildActionError(GuildActionError),
@@ -164,6 +165,7 @@ pub struct EntityState {
     pub entity_id: u64,
     pub kind: NetworkEntityKind,
     pub class: CharacterClass,
+    pub alignment: AlignmentStatus,
     pub guild_name: Option<String>,
     pub map_id: String,
     pub x: f32,
@@ -296,6 +298,12 @@ pub struct StatusEffectUpdate {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemNotice {
+    pub player_id: u64,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PkNotice {
     pub player_id: u64,
     pub text: String,
 }

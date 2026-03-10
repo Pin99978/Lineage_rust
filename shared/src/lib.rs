@@ -5,9 +5,9 @@ pub mod protocol;
 
 pub use components::ai::{AggroRange, AiState, AttackCooldown};
 pub use components::combat::{
-    class_def, experience_required_for_level, spell_def, ActionState, ArmorClass, BaseStats, Buffs,
-    CharacterClass, CombatStats, EffectType, Experience, Health, KnownSpells, Level, Mana,
-    SpellCooldowns, SpellType, StatusEffect,
+    class_def, experience_required_for_level, spell_def, ActionState, Alignment, AlignmentStatus,
+    ArmorClass, BaseStats, Buffs, CharacterClass, CombatStats, EffectType, Experience, Health,
+    KnownSpells, Level, Mana, SpellCooldowns, SpellType, StatusEffect,
 };
 pub use components::guild::{GuildMembership, GuildRole};
 pub use components::item::{
@@ -41,6 +41,8 @@ impl Plugin for MovementComponentsPlugin {
             .register_type::<CharacterClass>()
             .register_type::<SpellCooldowns>()
             .register_type::<KnownSpells>()
+            .register_type::<AlignmentStatus>()
+            .register_type::<Alignment>()
             .register_type::<EffectType>()
             .register_type::<StatusEffect>()
             .register_type::<Buffs>()
