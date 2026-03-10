@@ -22,6 +22,9 @@ pub struct PaperdollSlotText {
     pub slot: EquipmentSlot,
 }
 
+#[derive(Component)]
+pub struct PaperdollStatsText;
+
 pub fn setup_paperdoll_ui(commands: &mut Commands) {
     let panel = commands
         .spawn((
@@ -73,6 +76,13 @@ pub fn setup_paperdoll_ui(commands: &mut Commands) {
                     ));
                 });
         }
+
+        parent.spawn((
+            PaperdollStatsText,
+            Text::new("LV 1  EXP 0/100\nSTR 15  DEX 15  INT 15  CON 15"),
+            TextFont::from_font_size(15.0),
+            TextColor(Color::srgb(0.85, 0.9, 0.95)),
+        ));
     });
 }
 
@@ -107,22 +117,40 @@ pub fn apply_paperdoll_visibility_system(
 }
 
 pub fn refresh_paperdoll_ui_system(
+    hud_state: Option<Res<super::HudState>>,
     equipment_state: Option<Res<LocalEquipmentState>>,
-    mut texts: Query<(&PaperdollSlotText, &mut Text)>,
+    mut slot_texts: Query<(&PaperdollSlotText, &mut Text)>,
+    mut stats_texts: Query<&mut Text, With<PaperdollStatsText>>,
 ) {
+    let Some(hud_state) = hud_state else {
+        return;
+    };
     let Some(equipment_state) = equipment_state else {
         return;
     };
-    if !equipment_state.is_changed() {
+    if !equipment_state.is_changed() && !hud_state.is_changed() {
         return;
     }
 
-    for (marker, mut text) in &mut texts {
+    for (marker, mut text) in &mut slot_texts {
         let equipped = match marker.slot {
             EquipmentSlot::Weapon => equipment_state.weapon,
             EquipmentSlot::Armor => equipment_state.armor,
         };
         *text = Text::new(format!("{:?}: {:?}", marker.slot, equipped));
+    }
+
+    if let Ok(mut stats_text) = stats_texts.single_mut() {
+        *stats_text = Text::new(format!(
+            "LV {}  EXP {}/{}\nSTR {}  DEX {}  INT {}  CON {}",
+            hud_state.level,
+            hud_state.exp_current,
+            hud_state.exp_next,
+            hud_state.str_stat,
+            hud_state.dex,
+            hud_state.int_stat,
+            hud_state.con
+        ));
     }
 }
 

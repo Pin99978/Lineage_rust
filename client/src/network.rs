@@ -202,6 +202,13 @@ pub fn receive_server_state(
                 equipment_state.weapon = None;
                 equipment_state.armor = None;
                 hud_state.quest_entries.clear();
+                hud_state.level = 1;
+                hud_state.exp_current = 0;
+                hud_state.exp_next = 100;
+                hud_state.str_stat = 15;
+                hud_state.dex = 15;
+                hud_state.int_stat = 15;
+                hud_state.con = 15;
                 dialog_state.visible = false;
                 dialog_state.text.clear();
                 dialog_state.choices.clear();
@@ -293,6 +300,29 @@ pub fn receive_server_state(
                     hud_state.mana_current = event.current;
                     hud_state.mana_max = event.max;
                     info!("mana: {}/{}", event.current, event.max);
+                }
+            }
+            ServerMessage::ExpUpdateEvent(event) => {
+                if local_player.id == Some(event.player_id) {
+                    hud_state.level = event.level.max(1);
+                    hud_state.exp_current = event.exp_current;
+                    hud_state.exp_next = event.exp_next.max(1);
+                    hud_state.str_stat = event.str_stat;
+                    hud_state.dex = event.dex;
+                    hud_state.int_stat = event.int_stat;
+                    hud_state.con = event.con;
+                }
+            }
+            ServerMessage::LevelUpEvent(event) => {
+                if local_player.id == Some(event.player_id) {
+                    hud_state.level = event.new_level.max(1);
+                    hud_state.mana_max = event.mana_max.max(1);
+                    hud_state.mana_current = event.mana_max.max(1);
+                    dialog_state.text = format!("LEVEL UP! Level {}", event.new_level);
+                    dialog_state.choices.clear();
+                    dialog_state.npc_id = None;
+                    dialog_state.visible = true;
+                    dialog_state.timer.reset();
                 }
             }
             ServerMessage::EquipmentUpdate(event) => {

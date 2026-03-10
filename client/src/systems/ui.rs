@@ -26,6 +26,13 @@ pub struct LoginName {
 pub struct HudState {
     pub mana_current: i32,
     pub mana_max: i32,
+    pub level: u32,
+    pub exp_current: u32,
+    pub exp_next: u32,
+    pub str_stat: u32,
+    pub dex: u32,
+    pub int_stat: u32,
+    pub con: u32,
     pub equipment: EquipmentMap,
     pub status_effects: Vec<StatusEffect>,
     pub quest_entries: Vec<(QuestId, QuestStatus)>,
@@ -36,6 +43,13 @@ impl Default for HudState {
         Self {
             mana_current: 60,
             mana_max: 60,
+            level: 1,
+            exp_current: 0,
+            exp_next: 100,
+            str_stat: 15,
+            dex: 15,
+            int_stat: 15,
+            con: 15,
             equipment: EquipmentMap::default(),
             status_effects: Vec::new(),
             quest_entries: Vec::new(),
@@ -72,6 +86,12 @@ pub struct PlayerHealthBarUi;
 
 #[derive(Component)]
 pub struct PlayerManaBarUi;
+
+#[derive(Component)]
+pub struct PlayerExpBarUi;
+
+#[derive(Component)]
+pub struct PlayerExpTextUi;
 
 #[derive(Component)]
 pub struct EquipmentTextUi;
@@ -222,6 +242,38 @@ pub fn setup_ui(mut commands: Commands) {
         ))
         .id();
 
+    let exp_bg = commands
+        .spawn((
+            Node {
+                width: Val::Px(260.0),
+                height: Val::Px(12.0),
+                ..Default::default()
+            },
+            BackgroundColor(Color::srgb(0.09, 0.09, 0.05)),
+        ))
+        .id();
+
+    let exp_fill = commands
+        .spawn((
+            PlayerExpBarUi,
+            Node {
+                width: Val::Percent(0.0),
+                height: Val::Percent(100.0),
+                ..Default::default()
+            },
+            BackgroundColor(Color::srgb(0.82, 0.72, 0.16)),
+        ))
+        .id();
+
+    let exp_text = commands
+        .spawn((
+            PlayerExpTextUi,
+            Text::new("Lv 1 EXP 0/100"),
+            TextFont::from_font_size(13.0),
+            TextColor(Color::srgb(0.94, 0.92, 0.8)),
+        ))
+        .id();
+
     let equipment_text = commands
         .spawn((
             EquipmentTextUi,
@@ -252,6 +304,9 @@ pub fn setup_ui(mut commands: Commands) {
     commands.entity(health_bg).add_child(health_fill);
     commands.entity(root).add_child(mana_bg);
     commands.entity(mana_bg).add_child(mana_fill);
+    commands.entity(root).add_child(exp_bg);
+    commands.entity(exp_bg).add_child(exp_fill);
+    commands.entity(root).add_child(exp_text);
     commands.entity(root).add_child(equipment_text);
     commands.entity(root).add_child(hint_text);
     commands.entity(root).add_child(status_text);
@@ -347,6 +402,35 @@ pub fn update_equipment_text_hud(
     ));
 }
 
+pub fn update_player_exp_hud(
+    hud_state: Option<Res<HudState>>,
+    mut exp_bar_query: Query<&mut Node, With<PlayerExpBarUi>>,
+    mut exp_text_query: Query<&mut Text, With<PlayerExpTextUi>>,
+) {
+    let Some(hud_state) = hud_state else {
+        return;
+    };
+    if !hud_state.is_changed() {
+        return;
+    }
+
+    if let Ok(mut bar_node) = exp_bar_query.single_mut() {
+        let ratio = if hud_state.exp_next > 0 {
+            (hud_state.exp_current as f32 / hud_state.exp_next as f32).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        bar_node.width = Val::Percent(ratio * 100.0);
+    }
+
+    if let Ok(mut exp_text) = exp_text_query.single_mut() {
+        *exp_text = Text::new(format!(
+            "Lv {} EXP {}/{}",
+            hud_state.level, hud_state.exp_current, hud_state.exp_next
+        ));
+    }
+}
+
 pub fn update_status_effects_hud(
     hud_state: Option<Res<HudState>>,
     mut text_query: Query<&mut Text, With<StatusEffectsTextUi>>,
@@ -372,8 +456,6 @@ pub fn update_status_effects_hud(
     }
     *text = Text::new(format!("Status: {}", labels.join(", ")));
 }
-
-#[allow(clippy::type_complexity)]
 pub fn update_dialog_hud(
     time: Res<Time>,
     dialog_state: Option<ResMut<DialogState>>,

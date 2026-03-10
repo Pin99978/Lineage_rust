@@ -1,5 +1,8 @@
 use bevy::prelude::*;
-use shared::{ActionState, Buffs, CombatStats, EffectType, Health, Position, StatusEffect};
+use shared::{
+    experience_required_for_level, ActionState, BaseStats, Buffs, CombatStats, EffectType,
+    Experience, Health, Level, Mana, Position, StatusEffect,
+};
 
 use crate::network;
 
@@ -27,6 +30,26 @@ pub struct CombatDeathEvent {
 pub struct StatusEffectsChangedMessage {
     pub player_id: u64,
     pub effects: Vec<StatusEffect>,
+}
+
+#[derive(Message, Debug, Clone, Copy)]
+pub struct ExpChangedMessage {
+    pub player_id: u64,
+    pub level: u32,
+    pub exp_current: u32,
+    pub exp_next: u32,
+    pub str_stat: u32,
+    pub dex: u32,
+    pub int_stat: u32,
+    pub con: u32,
+}
+
+#[derive(Message, Debug, Clone, Copy)]
+pub struct LevelUpMessage {
+    pub player_id: u64,
+    pub new_level: u32,
+    pub health_max: i32,
+    pub mana_max: i32,
 }
 
 pub fn combat_system(
@@ -222,4 +245,92 @@ pub fn log_player_death_system(
             info!("player {} died", death.target_id);
         }
     }
+}
+
+pub fn experience_and_level_system(
+    mut death_events: MessageReader<CombatDeathEvent>,
+    entities: Query<&network::NetworkEntity>,
+    mut players: Query<
+        (
+            &network::NetworkEntity,
+            &mut Level,
+            &mut Experience,
+            &BaseStats,
+            &mut Health,
+            &mut Mana,
+        ),
+        With<network::PlayerCharacter>,
+    >,
+    mut exp_events: MessageWriter<ExpChangedMessage>,
+    mut level_up_events: MessageWriter<LevelUpMessage>,
+) {
+    for death in death_events.read() {
+        let Some(killer_player_id) = death.killer_player_id else {
+            continue;
+        };
+        let Ok(dead_net) = entities.get(death.target_entity) else {
+            continue;
+        };
+        if dead_net.kind != shared::protocol::NetworkEntityKind::Enemy {
+            continue;
+        }
+
+        let mut awarded = false;
+        for (player_net, mut level, mut exp, base_stats, mut health, mut mana) in &mut players {
+            if player_net.id != killer_player_id {
+                continue;
+            }
+
+            let reward = 70_u32;
+            exp.current = exp.current.saturating_add(reward);
+            awarded = true;
+
+            while exp.current >= exp.next_level_req.max(1) {
+                exp.current -= exp.next_level_req.max(1);
+                level.current = level.current.saturating_add(1);
+                exp.next_level_req = experience_required_for_level(level.current);
+
+                let hp_gain = roll_growth(base_stats.con, level.current, player_net.id, 17);
+                let mp_gain = roll_growth(base_stats.int_stat, level.current, player_net.id, 31);
+                health.max = health.max.saturating_add(hp_gain as i32);
+                mana.max = mana.max.saturating_add(mp_gain as i32);
+                health.current = health.max;
+                mana.current = mana.max;
+
+                level_up_events.write(LevelUpMessage {
+                    player_id: player_net.id,
+                    new_level: level.current,
+                    health_max: health.max,
+                    mana_max: mana.max,
+                });
+            }
+
+            exp_events.write(ExpChangedMessage {
+                player_id: player_net.id,
+                level: level.current,
+                exp_current: exp.current,
+                exp_next: exp.next_level_req,
+                str_stat: base_stats.str_stat,
+                dex: base_stats.dex,
+                int_stat: base_stats.int_stat,
+                con: base_stats.con,
+            });
+            break;
+        }
+
+        if !awarded {
+            continue;
+        }
+    }
+}
+
+fn roll_growth(primary_stat: u32, level: u32, player_id: u64, salt: u64) -> u32 {
+    let min_gain = (primary_stat / 2).max(1);
+    let max_gain = primary_stat.max(min_gain + 1);
+    let span = max_gain - min_gain + 1;
+    let seed = player_id
+        .wrapping_mul(1103515245)
+        .wrapping_add((level as u64).wrapping_mul(12345))
+        .wrapping_add(salt);
+    min_gain + (seed as u32 % span)
 }

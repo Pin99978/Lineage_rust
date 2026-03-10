@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use rusqlite::{params, Connection};
-use shared::{EquipmentMap, Inventory, QuestTracker};
+use shared::{BaseStats, EquipmentMap, Experience, Inventory, Level, QuestTracker};
 use std::collections::HashMap;
 use std::thread;
 use std::time::Duration;
@@ -19,6 +19,10 @@ pub struct PersistedPlayer {
     pub health_max: i32,
     pub mana_current: i32,
     pub mana_max: i32,
+    pub level: u32,
+    pub exp_current: u32,
+    pub exp_next: u32,
+    pub base_stats: BaseStats,
     pub inventory: Inventory,
     pub equipment: EquipmentMap,
     pub quests: QuestTracker,
@@ -96,6 +100,13 @@ fn db_worker_loop(command_rx: Receiver<DbCommand>, result_tx: Sender<DbResult>) 
             health_max INTEGER NOT NULL,
             mana_current INTEGER NOT NULL DEFAULT 60,
             mana_max INTEGER NOT NULL DEFAULT 60,
+            level INTEGER NOT NULL DEFAULT 1,
+            exp_current INTEGER NOT NULL DEFAULT 0,
+            exp_next INTEGER NOT NULL DEFAULT 100,
+            str_stat INTEGER NOT NULL DEFAULT 15,
+            dex INTEGER NOT NULL DEFAULT 15,
+            int_stat INTEGER NOT NULL DEFAULT 15,
+            con INTEGER NOT NULL DEFAULT 15,
             inventory_json TEXT NOT NULL,
             equipment_json TEXT NOT NULL DEFAULT '{"weapon":null,"armor":null}'
         );
@@ -137,6 +148,69 @@ fn db_worker_loop(command_rx: Receiver<DbCommand>, result_tx: Sender<DbResult>) 
         error!("database migration failed: {}", error);
         return;
     }
+    if let Err(error) = ensure_column(
+        &conn,
+        "users",
+        "level",
+        "ALTER TABLE users ADD COLUMN level INTEGER NOT NULL DEFAULT 1",
+    ) {
+        error!("database migration failed: {}", error);
+        return;
+    }
+    if let Err(error) = ensure_column(
+        &conn,
+        "users",
+        "exp_current",
+        "ALTER TABLE users ADD COLUMN exp_current INTEGER NOT NULL DEFAULT 0",
+    ) {
+        error!("database migration failed: {}", error);
+        return;
+    }
+    if let Err(error) = ensure_column(
+        &conn,
+        "users",
+        "exp_next",
+        "ALTER TABLE users ADD COLUMN exp_next INTEGER NOT NULL DEFAULT 100",
+    ) {
+        error!("database migration failed: {}", error);
+        return;
+    }
+    if let Err(error) = ensure_column(
+        &conn,
+        "users",
+        "str_stat",
+        "ALTER TABLE users ADD COLUMN str_stat INTEGER NOT NULL DEFAULT 15",
+    ) {
+        error!("database migration failed: {}", error);
+        return;
+    }
+    if let Err(error) = ensure_column(
+        &conn,
+        "users",
+        "dex",
+        "ALTER TABLE users ADD COLUMN dex INTEGER NOT NULL DEFAULT 15",
+    ) {
+        error!("database migration failed: {}", error);
+        return;
+    }
+    if let Err(error) = ensure_column(
+        &conn,
+        "users",
+        "int_stat",
+        "ALTER TABLE users ADD COLUMN int_stat INTEGER NOT NULL DEFAULT 15",
+    ) {
+        error!("database migration failed: {}", error);
+        return;
+    }
+    if let Err(error) = ensure_column(
+        &conn,
+        "users",
+        "con",
+        "ALTER TABLE users ADD COLUMN con INTEGER NOT NULL DEFAULT 15",
+    ) {
+        error!("database migration failed: {}", error);
+        return;
+    }
 
     while let Ok(command) = command_rx.recv() {
         match command {
@@ -157,6 +231,10 @@ fn db_worker_loop(command_rx: Receiver<DbCommand>, result_tx: Sender<DbResult>) 
                     health_max: 100,
                     mana_current: 60,
                     mana_max: 60,
+                    level: 1,
+                    exp_current: 0,
+                    exp_next: shared::experience_required_for_level(1),
+                    base_stats: BaseStats::default(),
                     inventory: Inventory::default(),
                     equipment: EquipmentMap::default(),
                     quests: QuestTracker::default(),
@@ -215,7 +293,7 @@ fn ensure_column(
 fn load_player(conn: &Connection, username: &str) -> Option<PersistedPlayer> {
     let mut statement = conn
         .prepare(
-            "SELECT x, y, health_current, health_max, mana_current, mana_max, inventory_json, equipment_json FROM users WHERE username = ?1",
+            "SELECT x, y, health_current, health_max, mana_current, mana_max, level, exp_current, exp_next, str_stat, dex, int_stat, con, inventory_json, equipment_json FROM users WHERE username = ?1",
         )
         .ok()?;
     let row = statement
@@ -227,15 +305,22 @@ fn load_player(conn: &Connection, username: &str) -> Option<PersistedPlayer> {
                 row.get::<_, i32>(3)?,
                 row.get::<_, i32>(4)?,
                 row.get::<_, i32>(5)?,
-                row.get::<_, String>(6)?,
-                row.get::<_, String>(7)?,
+                row.get::<_, u32>(6)?,
+                row.get::<_, u32>(7)?,
+                row.get::<_, u32>(8)?,
+                row.get::<_, u32>(9)?,
+                row.get::<_, u32>(10)?,
+                row.get::<_, u32>(11)?,
+                row.get::<_, u32>(12)?,
+                row.get::<_, String>(13)?,
+                row.get::<_, String>(14)?,
             ))
         })
         .ok()?;
 
     let inventory_items: HashMap<shared::ItemType, u32> =
-        serde_json::from_str(&row.6).unwrap_or_default();
-    let equipment = serde_json::from_str(&row.7).unwrap_or_default();
+        serde_json::from_str(&row.13).unwrap_or_default();
+    let equipment = serde_json::from_str(&row.14).unwrap_or_default();
     let quests = load_quests(conn, username);
     Some(PersistedPlayer {
         username: username.to_string(),
@@ -245,6 +330,15 @@ fn load_player(conn: &Connection, username: &str) -> Option<PersistedPlayer> {
         health_max: row.3,
         mana_current: row.4,
         mana_max: row.5,
+        level: row.6.max(1),
+        exp_current: row.7,
+        exp_next: row.8.max(1),
+        base_stats: BaseStats {
+            str_stat: row.9,
+            dex: row.10,
+            int_stat: row.11,
+            con: row.12,
+        },
         inventory: Inventory {
             items: inventory_items,
         },
@@ -268,10 +362,17 @@ fn save_player(conn: &Connection, data: &PersistedPlayer) -> Result<(), String> 
             health_max,
             mana_current,
             mana_max,
+            level,
+            exp_current,
+            exp_next,
+            str_stat,
+            dex,
+            int_stat,
+            con,
             inventory_json,
             equipment_json
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
         ON CONFLICT(username) DO UPDATE SET
             x = excluded.x,
             y = excluded.y,
@@ -279,6 +380,13 @@ fn save_player(conn: &Connection, data: &PersistedPlayer) -> Result<(), String> 
             health_max = excluded.health_max,
             mana_current = excluded.mana_current,
             mana_max = excluded.mana_max,
+            level = excluded.level,
+            exp_current = excluded.exp_current,
+            exp_next = excluded.exp_next,
+            str_stat = excluded.str_stat,
+            dex = excluded.dex,
+            int_stat = excluded.int_stat,
+            con = excluded.con,
             inventory_json = excluded.inventory_json,
             equipment_json = excluded.equipment_json
         "#,
@@ -290,6 +398,13 @@ fn save_player(conn: &Connection, data: &PersistedPlayer) -> Result<(), String> 
             data.health_max,
             data.mana_current,
             data.mana_max,
+            data.level,
+            data.exp_current,
+            data.exp_next,
+            data.base_stats.str_stat,
+            data.base_stats.dex,
+            data.base_stats.int_stat,
+            data.base_stats.con,
             inventory_json,
             equipment_json
         ],
@@ -359,6 +474,9 @@ pub fn periodic_save_players(
         &shared::Position,
         &shared::Health,
         &shared::Mana,
+        &Level,
+        &Experience,
+        &BaseStats,
         &Inventory,
         &EquipmentMap,
         &QuestTracker,
@@ -385,8 +503,18 @@ pub fn periodic_save_players(
         else {
             continue;
         };
-        let Ok((_network_entity, position, health, mana, inventory, equipment, quests)) =
-            players.get(entity)
+        let Ok((
+            _network_entity,
+            position,
+            health,
+            mana,
+            level,
+            exp,
+            base_stats,
+            inventory,
+            equipment,
+            quests,
+        )) = players.get(entity)
         else {
             continue;
         };
@@ -398,6 +526,10 @@ pub fn periodic_save_players(
             health_max: health.max,
             mana_current: mana.current,
             mana_max: mana.max,
+            level: level.current,
+            exp_current: exp.current,
+            exp_next: exp.next_level_req,
+            base_stats: *base_stats,
             inventory: inventory.clone(),
             equipment: equipment.clone(),
             quests: quests.clone(),
@@ -415,6 +547,9 @@ pub fn save_player_progress_on_change(
             &shared::Position,
             &shared::Health,
             &shared::Mana,
+            &Level,
+            &Experience,
+            &BaseStats,
             &Inventory,
             &EquipmentMap,
             &QuestTracker,
@@ -423,6 +558,9 @@ pub fn save_player_progress_on_change(
             Changed<shared::Position>,
             Changed<shared::Health>,
             Changed<shared::Mana>,
+            Changed<Level>,
+            Changed<Experience>,
+            Changed<BaseStats>,
             Changed<Inventory>,
             Changed<EquipmentMap>,
             Changed<QuestTracker>,
@@ -442,7 +580,9 @@ pub fn save_player_progress_on_change(
         else {
             continue;
         };
-        let Ok((position, health, mana, inventory, equipment, quests)) = players.get(entity) else {
+        let Ok((position, health, mana, level, exp, base_stats, inventory, equipment, quests)) =
+            players.get(entity)
+        else {
             continue;
         };
         let _ = db_bridge.command_tx.send(DbCommand::SavePlayer {
@@ -454,6 +594,10 @@ pub fn save_player_progress_on_change(
                 health_max: health.max,
                 mana_current: mana.current,
                 mana_max: mana.max,
+                level: level.current,
+                exp_current: exp.current,
+                exp_next: exp.next_level_req,
+                base_stats: *base_stats,
                 inventory: inventory.clone(),
                 equipment: equipment.clone(),
                 quests: quests.clone(),

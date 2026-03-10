@@ -96,6 +96,8 @@ pub enum ServerMessage {
     ItemDespawnEvent(ItemDespawnEvent),
     InventoryUpdate(InventoryUpdate),
     ManaUpdate(ManaUpdate),
+    ExpUpdateEvent(ExpUpdateEvent),
+    LevelUpEvent(LevelUpEvent),
     EquipmentUpdate(EquipmentUpdate),
     HealEvent(HealEvent),
     DialogEvent(DialogEvent),
@@ -178,6 +180,26 @@ pub struct ManaUpdate {
     pub player_id: u64,
     pub current: i32,
     pub max: i32,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct ExpUpdateEvent {
+    pub player_id: u64,
+    pub level: u32,
+    pub exp_current: u32,
+    pub exp_next: u32,
+    pub str_stat: u32,
+    pub dex: u32,
+    pub int_stat: u32,
+    pub con: u32,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct LevelUpEvent {
+    pub player_id: u64,
+    pub new_level: u32,
+    pub health_max: i32,
+    pub mana_max: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

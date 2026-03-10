@@ -32,7 +32,9 @@ pub fn capture_click_intent(
     }
     if windows_state
         .as_ref()
-        .map(|state| state.blocks_world_input())
+        .map(
+            |state: &Res<crate::systems::ui::inventory::UiWindowsState>| state.blocks_world_input(),
+        )
         .unwrap_or(false)
     {
         return;

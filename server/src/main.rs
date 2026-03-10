@@ -18,6 +18,8 @@ fn main() {
         .add_message::<systems::combat::AttackRequest>()
         .add_message::<systems::combat::CombatDamageEvent>()
         .add_message::<systems::combat::CombatDeathEvent>()
+        .add_message::<systems::combat::ExpChangedMessage>()
+        .add_message::<systems::combat::LevelUpMessage>()
         .add_message::<systems::drop::ItemSpawnedMessage>()
         .add_message::<systems::loot::LootRequest>()
         .add_message::<systems::loot::ItemDespawnedMessage>()
@@ -61,6 +63,7 @@ fn main() {
                 systems::movement::movement_system,
                 systems::combat::combat_system,
                 systems::combat::update_status_effects_system,
+                systems::combat::experience_and_level_system,
                 systems::spell::tick_spell_cooldowns,
                 systems::spell::cast_spell_system,
                 systems::item::use_item_system,
@@ -92,6 +95,7 @@ fn main() {
                 network::broadcast_combat_events,
                 network::broadcast_item_events,
                 network::broadcast_spell_events,
+                network::broadcast_progression_events,
                 network::broadcast_equipment_events,
                 network::broadcast_dialog_events,
                 network::broadcast_chat_events,

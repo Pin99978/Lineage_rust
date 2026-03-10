@@ -6,8 +6,8 @@ use shared::protocol::{
     StatusEffectUpdate, UseItemIntent,
 };
 use shared::{
-    ActionState, ArmorClass, Buffs, CombatStats, Health, Mana, MapId, MoveSpeed, PathQueue,
-    Position, SpellCooldowns, TargetPosition, MAP_TOWN,
+    ActionState, ArmorClass, BaseStats, Buffs, CombatStats, Experience, Health, Level, Mana, MapId,
+    MoveSpeed, PathQueue, Position, SpellCooldowns, TargetPosition, MAP_TOWN,
 };
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
@@ -95,6 +95,9 @@ pub fn receive_client_messages(
         &Position,
         &Health,
         &Mana,
+        &Level,
+        &Experience,
+        &BaseStats,
         &shared::Inventory,
         &shared::EquipmentMap,
         &Buffs,
@@ -149,6 +152,9 @@ pub fn receive_client_messages(
                                 position,
                                 health,
                                 mana,
+                                level,
+                                exp,
+                                base_stats,
                                 inventory,
                                 equipment,
                                 _buffs,
@@ -164,6 +170,10 @@ pub fn receive_client_messages(
                                         health_max: health.max,
                                         mana_current: mana.current,
                                         mana_max: mana.max,
+                                        level: level.current,
+                                        exp_current: exp.current,
+                                        exp_next: exp.next_level_req,
+                                        base_stats: *base_stats,
                                         inventory: inventory.clone(),
                                         equipment: equipment.clone(),
                                         quests: quests.clone(),
@@ -362,6 +372,9 @@ fn handle_login_request(
         &Position,
         &Health,
         &Mana,
+        &Level,
+        &Experience,
+        &BaseStats,
         &shared::Inventory,
         &shared::EquipmentMap,
         &Buffs,
@@ -478,13 +491,17 @@ fn send_player_snapshot(
         &Position,
         &Health,
         &Mana,
+        &Level,
+        &Experience,
+        &BaseStats,
         &shared::Inventory,
         &shared::EquipmentMap,
         &Buffs,
         &shared::QuestTracker,
     )>,
 ) {
-    let Ok((_, _, mana, inventory, equipment, buffs, quests)) = player_snapshot.get(player_entity)
+    let Ok((_, _, mana, level, exp, base_stats, inventory, equipment, buffs, quests)) =
+        player_snapshot.get(player_entity)
     else {
         return;
     };
@@ -525,6 +542,20 @@ fn send_player_snapshot(
         let _ = socket.send_to(&payload, address);
     }
 
+    let exp_message = ServerMessage::ExpUpdateEvent(shared::protocol::ExpUpdateEvent {
+        player_id,
+        level: level.current,
+        exp_current: exp.current,
+        exp_next: exp.next_level_req,
+        str_stat: base_stats.str_stat,
+        dex: base_stats.dex,
+        int_stat: base_stats.int_stat,
+        con: base_stats.con,
+    });
+    if let Ok(payload) = encode_server_message(&exp_message) {
+        let _ = socket.send_to(&payload, address);
+    }
+
     for quest in &quests.active_quests {
         let quest_message = ServerMessage::QuestUpdateEvent(shared::protocol::QuestUpdateEvent {
             player_id,
@@ -545,6 +576,9 @@ pub fn cleanup_stale_sessions(
         &Position,
         &Health,
         &Mana,
+        &Level,
+        &Experience,
+        &BaseStats,
         &shared::Inventory,
         &shared::EquipmentMap,
         &shared::QuestTracker,
@@ -569,8 +603,17 @@ pub fn cleanup_stale_sessions(
             if let (Some(username), Some(entity), Some(db_bridge)) =
                 (session.username.clone(), session.entity, db_bridge.as_ref())
             {
-                if let Ok((position, health, mana, inventory, equipment, quests)) =
-                    players.get(entity)
+                if let Ok((
+                    position,
+                    health,
+                    mana,
+                    level,
+                    exp,
+                    base_stats,
+                    inventory,
+                    equipment,
+                    quests,
+                )) = players.get(entity)
                 {
                     let _ = db_bridge.command_tx.send(db::DbCommand::SavePlayer {
                         data: db::PersistedPlayer {
@@ -581,6 +624,10 @@ pub fn cleanup_stale_sessions(
                             health_max: health.max,
                             mana_current: mana.current,
                             mana_max: mana.max,
+                            level: level.current,
+                            exp_current: exp.current,
+                            exp_next: exp.next_level_req,
+                            base_stats: *base_stats,
                             inventory: inventory.clone(),
                             equipment: equipment.clone(),
                             quests: quests.clone(),
@@ -666,6 +713,14 @@ pub fn apply_db_results(
                 ));
                 player_commands.insert(MapId(MAP_TOWN.to_string()));
                 player_commands.insert(data.quests.clone());
+                player_commands.insert(Level {
+                    current: data.level.max(1),
+                });
+                player_commands.insert(Experience {
+                    current: data.exp_current,
+                    next_level_req: data.exp_next.max(1),
+                });
+                player_commands.insert(data.base_stats);
                 let player_entity = player_commands.id();
 
                 let session = network
@@ -724,6 +779,20 @@ pub fn apply_db_results(
                     effects: Vec::new(),
                 });
                 if let Ok(payload) = encode_server_message(&status_message) {
+                    let _ = network.socket.send_to(&payload, address);
+                }
+
+                let exp_message = ServerMessage::ExpUpdateEvent(shared::protocol::ExpUpdateEvent {
+                    player_id,
+                    level: data.level.max(1),
+                    exp_current: data.exp_current,
+                    exp_next: data.exp_next.max(1),
+                    str_stat: data.base_stats.str_stat,
+                    dex: data.base_stats.dex,
+                    int_stat: data.base_stats.int_stat,
+                    con: data.base_stats.con,
+                });
+                if let Ok(payload) = encode_server_message(&exp_message) {
                     let _ = network.socket.send_to(&payload, address);
                 }
 
@@ -1082,6 +1151,54 @@ pub fn broadcast_status_effect_events(
         };
         for (&address, session) in &network.sessions {
             if session.logged_in && session.player_id == Some(status.player_id) {
+                let _ = network.socket.send_to(&payload, address);
+            }
+        }
+    }
+}
+
+pub fn broadcast_progression_events(
+    network: Option<Res<ServerNetwork>>,
+    mut exp_events: MessageReader<combat::ExpChangedMessage>,
+    mut level_up_events: MessageReader<combat::LevelUpMessage>,
+) {
+    let Some(network) = network else {
+        return;
+    };
+
+    for exp in exp_events.read() {
+        let message = ServerMessage::ExpUpdateEvent(shared::protocol::ExpUpdateEvent {
+            player_id: exp.player_id,
+            level: exp.level,
+            exp_current: exp.exp_current,
+            exp_next: exp.exp_next,
+            str_stat: exp.str_stat,
+            dex: exp.dex,
+            int_stat: exp.int_stat,
+            con: exp.con,
+        });
+        let Ok(payload) = encode_server_message(&message) else {
+            continue;
+        };
+        for (&address, session) in &network.sessions {
+            if session.logged_in && session.player_id == Some(exp.player_id) {
+                let _ = network.socket.send_to(&payload, address);
+            }
+        }
+    }
+
+    for level_up in level_up_events.read() {
+        let message = ServerMessage::LevelUpEvent(shared::protocol::LevelUpEvent {
+            player_id: level_up.player_id,
+            new_level: level_up.new_level,
+            health_max: level_up.health_max,
+            mana_max: level_up.mana_max,
+        });
+        let Ok(payload) = encode_server_message(&message) else {
+            continue;
+        };
+        for (&address, session) in &network.sessions {
+            if session.logged_in && session.player_id == Some(level_up.player_id) {
                 let _ = network.socket.send_to(&payload, address);
             }
         }
