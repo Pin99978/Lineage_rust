@@ -79,7 +79,7 @@ pub fn setup_paperdoll_ui(commands: &mut Commands) {
 
         parent.spawn((
             PaperdollStatsText,
-            Text::new("LV 1  EXP 0/100\nSTR 15  DEX 15  INT 15  CON 15"),
+            Text::new("[Knight] LV 1  EXP 0/100\nSTR 15  DEX 15  INT 15  CON 15"),
             TextFont::from_font_size(15.0),
             TextColor(Color::srgb(0.85, 0.9, 0.95)),
         ));
@@ -119,8 +119,8 @@ pub fn apply_paperdoll_visibility_system(
 pub fn refresh_paperdoll_ui_system(
     hud_state: Option<Res<super::HudState>>,
     equipment_state: Option<Res<LocalEquipmentState>>,
-    mut slot_texts: Query<(&PaperdollSlotText, &mut Text)>,
-    mut stats_texts: Query<&mut Text, With<PaperdollStatsText>>,
+    mut slot_texts: Query<(&PaperdollSlotText, &mut Text), Without<PaperdollStatsText>>,
+    mut stats_texts: Query<&mut Text, (With<PaperdollStatsText>, Without<PaperdollSlotText>)>,
 ) {
     let Some(hud_state) = hud_state else {
         return;
@@ -142,7 +142,8 @@ pub fn refresh_paperdoll_ui_system(
 
     if let Ok(mut stats_text) = stats_texts.single_mut() {
         *stats_text = Text::new(format!(
-            "LV {}  EXP {}/{}\nSTR {}  DEX {}  INT {}  CON {}",
+            "[{}] LV {}  EXP {}/{}\nSTR {}  DEX {}  INT {}  CON {}",
+            super::class_label(hud_state.class),
             hud_state.level,
             hud_state.exp_current,
             hud_state.exp_next,

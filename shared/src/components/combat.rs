@@ -71,6 +71,115 @@ pub enum SpellType {
     Heal,
 }
 
+#[derive(
+    Component, Debug, Clone, Copy, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize, Default,
+)]
+#[reflect(Component, Default)]
+pub enum CharacterClass {
+    Prince,
+    #[default]
+    Knight,
+    Elf,
+    Wizard,
+    DarkElf,
+}
+
+impl CharacterClass {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CharacterClass::Prince => "Prince",
+            CharacterClass::Knight => "Knight",
+            CharacterClass::Elf => "Elf",
+            CharacterClass::Wizard => "Wizard",
+            CharacterClass::DarkElf => "DarkElf",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "Prince" => Some(CharacterClass::Prince),
+            "Knight" => Some(CharacterClass::Knight),
+            "Elf" => Some(CharacterClass::Elf),
+            "Wizard" => Some(CharacterClass::Wizard),
+            "DarkElf" => Some(CharacterClass::DarkElf),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ClassDef {
+    pub base_str: u32,
+    pub base_dex: u32,
+    pub base_int: u32,
+    pub base_con: u32,
+    pub base_hp: i32,
+    pub base_mp: i32,
+    pub hp_growth_mult: f32,
+    pub mp_growth_mult: f32,
+    pub can_cast: Vec<SpellType>,
+}
+
+pub fn class_def(class: CharacterClass) -> ClassDef {
+    match class {
+        CharacterClass::Prince => ClassDef {
+            base_str: 13,
+            base_dex: 10,
+            base_int: 10,
+            base_con: 10,
+            base_hp: 95,
+            base_mp: 36,
+            hp_growth_mult: 1.0,
+            mp_growth_mult: 0.5,
+            can_cast: vec![SpellType::Heal],
+        },
+        CharacterClass::Knight => ClassDef {
+            base_str: 16,
+            base_dex: 12,
+            base_int: 8,
+            base_con: 14,
+            base_hp: 120,
+            base_mp: 22,
+            hp_growth_mult: 1.4,
+            mp_growth_mult: 0.2,
+            can_cast: Vec::new(),
+        },
+        CharacterClass::Elf => ClassDef {
+            base_str: 11,
+            base_dex: 12,
+            base_int: 12,
+            base_con: 12,
+            base_hp: 90,
+            base_mp: 48,
+            hp_growth_mult: 0.8,
+            mp_growth_mult: 1.2,
+            can_cast: vec![SpellType::Heal],
+        },
+        CharacterClass::Wizard => ClassDef {
+            base_str: 8,
+            base_dex: 7,
+            base_int: 18,
+            base_con: 12,
+            base_hp: 76,
+            base_mp: 70,
+            hp_growth_mult: 0.6,
+            mp_growth_mult: 1.5,
+            can_cast: vec![SpellType::Fireball, SpellType::Heal],
+        },
+        CharacterClass::DarkElf => ClassDef {
+            base_str: 12,
+            base_dex: 15,
+            base_int: 11,
+            base_con: 8,
+            base_hp: 88,
+            base_mp: 34,
+            hp_growth_mult: 0.9,
+            mp_growth_mult: 0.8,
+            can_cast: vec![SpellType::Fireball],
+        },
+    }
+}
+
 #[derive(Debug, Clone, Copy, Reflect)]
 pub struct SpellDef {
     pub req_level: u32,

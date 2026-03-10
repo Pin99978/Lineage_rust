@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use shared::{
-    experience_required_for_level, ActionState, BaseStats, Buffs, CombatStats, EffectType,
-    Experience, Health, Level, Mana, Position, StatusEffect,
+    class_def, experience_required_for_level, ActionState, BaseStats, Buffs, CharacterClass,
+    CombatStats, EffectType, Experience, Health, Level, Mana, Position, StatusEffect,
 };
 
 use crate::network;
@@ -256,6 +256,7 @@ pub fn experience_and_level_system(
             &mut Level,
             &mut Experience,
             &BaseStats,
+            &CharacterClass,
             &mut Health,
             &mut Mana,
         ),
@@ -276,7 +277,9 @@ pub fn experience_and_level_system(
         }
 
         let mut awarded = false;
-        for (player_net, mut level, mut exp, base_stats, mut health, mut mana) in &mut players {
+        for (player_net, mut level, mut exp, base_stats, class, mut health, mut mana) in
+            &mut players
+        {
             if player_net.id != killer_player_id {
                 continue;
             }
@@ -290,8 +293,17 @@ pub fn experience_and_level_system(
                 level.current = level.current.saturating_add(1);
                 exp.next_level_req = experience_required_for_level(level.current);
 
-                let hp_gain = roll_growth(base_stats.con, level.current, player_net.id, 17);
-                let mp_gain = roll_growth(base_stats.int_stat, level.current, player_net.id, 31);
+                let class_growth = class_def(*class);
+                let hp_gain = ((roll_growth(base_stats.con, level.current, player_net.id, 17)
+                    as f32)
+                    * class_growth.hp_growth_mult)
+                    .round()
+                    .max(1.0) as u32;
+                let mp_gain = ((roll_growth(base_stats.int_stat, level.current, player_net.id, 31)
+                    as f32)
+                    * class_growth.mp_growth_mult)
+                    .round()
+                    .max(1.0) as u32;
                 health.max = health.max.saturating_add(hp_gain as i32);
                 mana.max = mana.max.saturating_add(mp_gain as i32);
                 health.current = health.max;

@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{EquipmentMap, EquipmentSlot, ItemType, QuestId, QuestStatus, SpellType, StatusEffect};
+use crate::{
+    CharacterClass, EquipmentMap, EquipmentSlot, ItemType, QuestId, QuestStatus, SpellType,
+    StatusEffect,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ClientMessage {
@@ -20,6 +23,7 @@ pub enum ClientMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoginRequest {
     pub username: String,
+    pub class: CharacterClass,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -127,6 +131,7 @@ pub enum NetworkEntityKind {
 pub struct EntityState {
     pub entity_id: u64,
     pub kind: NetworkEntityKind,
+    pub class: CharacterClass,
     pub map_id: String,
     pub x: f32,
     pub y: f32,

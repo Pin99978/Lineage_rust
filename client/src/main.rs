@@ -23,6 +23,7 @@ fn main() {
             username,
             submitted: false,
         })
+        .insert_resource(systems::ui::LoginClassSelection::default())
         .insert_resource(systems::ui::HudState::default())
         .insert_resource(systems::ui::DialogState::default())
         .insert_resource(systems::ui::chat::ChatUiState::default())
@@ -57,6 +58,8 @@ fn main() {
             (
                 network::receive_server_state,
                 systems::ui::login_submit_system.run_if(in_state(systems::ui::AppState::LoginMenu)),
+                systems::ui::update_login_menu_class_text_system
+                    .run_if(in_state(systems::ui::AppState::LoginMenu)),
                 systems::ui::chat::chat_focus_and_send_system
                     .run_if(in_state(systems::ui::AppState::InGame)),
                 systems::ui::chat::chat_text_input_system

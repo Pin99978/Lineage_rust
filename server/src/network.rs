@@ -6,8 +6,8 @@ use shared::protocol::{
     StatusEffectUpdate, UseItemIntent,
 };
 use shared::{
-    ActionState, ArmorClass, BaseStats, Buffs, CombatStats, Experience, Health, Level, Mana, MapId,
-    MoveSpeed, PathQueue, Position, SpellCooldowns, TargetPosition, MAP_TOWN,
+    ActionState, ArmorClass, BaseStats, Buffs, CharacterClass, CombatStats, Experience, Health,
+    Level, Mana, MapId, MoveSpeed, PathQueue, Position, SpellCooldowns, TargetPosition, MAP_TOWN,
 };
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
@@ -98,6 +98,7 @@ pub fn receive_client_messages(
         &Level,
         &Experience,
         &BaseStats,
+        &CharacterClass,
         &shared::Inventory,
         &shared::EquipmentMap,
         &Buffs,
@@ -139,7 +140,7 @@ pub fn receive_client_messages(
             .last_seen = Instant::now();
 
         match message {
-            ClientMessage::LoginRequest(LoginRequest { username }) => {
+            ClientMessage::LoginRequest(LoginRequest { username, class }) => {
                 let requested = username.trim().to_string();
                 if let Some(existing) = network.sessions.get(&address).cloned() {
                     if existing.logged_in
@@ -155,6 +156,7 @@ pub fn receive_client_messages(
                                 level,
                                 exp,
                                 base_stats,
+                                player_class,
                                 inventory,
                                 equipment,
                                 _buffs,
@@ -174,6 +176,7 @@ pub fn receive_client_messages(
                                         exp_current: exp.current,
                                         exp_next: exp.next_level_req,
                                         base_stats: *base_stats,
+                                        class: *player_class,
                                         inventory: inventory.clone(),
                                         equipment: equipment.clone(),
                                         quests: quests.clone(),
@@ -194,6 +197,7 @@ pub fn receive_client_messages(
                     &player_snapshot,
                     address,
                     requested,
+                    class,
                 );
             }
             ClientMessage::MoveIntent(intent) => {
@@ -375,6 +379,7 @@ fn handle_login_request(
         &Level,
         &Experience,
         &BaseStats,
+        &CharacterClass,
         &shared::Inventory,
         &shared::EquipmentMap,
         &Buffs,
@@ -382,6 +387,7 @@ fn handle_login_request(
     )>,
     address: SocketAddr,
     username: String,
+    class: CharacterClass,
 ) {
     let username = username.trim().to_string();
     if username.is_empty() || username.len() > 24 {
@@ -467,6 +473,7 @@ fn handle_login_request(
         .send(db::DbCommand::LoadOrCreate {
             address,
             username: username.clone(),
+            class,
         })
         .is_ok()
     {
@@ -494,13 +501,14 @@ fn send_player_snapshot(
         &Level,
         &Experience,
         &BaseStats,
+        &CharacterClass,
         &shared::Inventory,
         &shared::EquipmentMap,
         &Buffs,
         &shared::QuestTracker,
     )>,
 ) {
-    let Ok((_, _, mana, level, exp, base_stats, inventory, equipment, buffs, quests)) =
+    let Ok((_, _, mana, level, exp, base_stats, _class, inventory, equipment, buffs, quests)) =
         player_snapshot.get(player_entity)
     else {
         return;
@@ -579,6 +587,7 @@ pub fn cleanup_stale_sessions(
         &Level,
         &Experience,
         &BaseStats,
+        &CharacterClass,
         &shared::Inventory,
         &shared::EquipmentMap,
         &shared::QuestTracker,
@@ -610,6 +619,7 @@ pub fn cleanup_stale_sessions(
                     level,
                     exp,
                     base_stats,
+                    player_class,
                     inventory,
                     equipment,
                     quests,
@@ -628,6 +638,7 @@ pub fn cleanup_stale_sessions(
                             exp_current: exp.current,
                             exp_next: exp.next_level_req,
                             base_stats: *base_stats,
+                            class: *player_class,
                             inventory: inventory.clone(),
                             equipment: equipment.clone(),
                             quests: quests.clone(),
@@ -721,6 +732,7 @@ pub fn apply_db_results(
                     next_level_req: data.exp_next.max(1),
                 });
                 player_commands.insert(data.base_stats);
+                player_commands.insert(data.class);
                 let player_entity = player_commands.id();
 
                 let session = network
@@ -829,8 +841,14 @@ pub fn apply_db_results(
 
 pub fn broadcast_world_state(
     network: Option<Res<ServerNetwork>>,
-    entities: Query<(&NetworkEntity, &MapId, &Position, Option<&Health>)>,
-    players: Query<&MapId, With<PlayerCharacter>>,
+    entities: Query<(
+        &NetworkEntity,
+        &MapId,
+        &Position,
+        Option<&Health>,
+        Option<&CharacterClass>,
+        Option<&PlayerCharacter>,
+    )>,
 ) {
     let Some(network) = network else {
         return;
@@ -843,10 +861,10 @@ pub fn broadcast_world_state(
         let Some(player_entity) = session.entity else {
             continue;
         };
-        let Ok(player_map) = players.get(player_entity) else {
+        let Ok((_, player_map, _, _, _, _)) = entities.get(player_entity) else {
             continue;
         };
-        for (network_entity, entity_map, position, health) in &entities {
+        for (network_entity, entity_map, position, health, class, _) in &entities {
             if entity_map.0 != player_map.0 {
                 continue;
             }
@@ -858,6 +876,7 @@ pub fn broadcast_world_state(
             let message = ServerMessage::EntityState(EntityState {
                 entity_id: network_entity.id,
                 kind: network_entity.kind,
+                class: class.copied().unwrap_or_default(),
                 map_id: entity_map.0.clone(),
                 x: position.x,
                 y: position.y,

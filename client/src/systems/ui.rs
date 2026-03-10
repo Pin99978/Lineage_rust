@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use shared::protocol::{InteractNpcIntent, LoginRequest};
-use shared::{EquipmentMap, Health, QuestId, QuestStatus, StatusEffect};
+use shared::{CharacterClass, EquipmentMap, Health, QuestId, QuestStatus, StatusEffect};
 
 use crate::{network, Player};
 
@@ -23,7 +23,21 @@ pub struct LoginName {
 }
 
 #[derive(Resource, Debug, Clone)]
+pub struct LoginClassSelection {
+    pub class: CharacterClass,
+}
+
+impl Default for LoginClassSelection {
+    fn default() -> Self {
+        Self {
+            class: CharacterClass::Knight,
+        }
+    }
+}
+
+#[derive(Resource, Debug, Clone)]
 pub struct HudState {
+    pub class: CharacterClass,
     pub mana_current: i32,
     pub mana_max: i32,
     pub level: u32,
@@ -41,6 +55,7 @@ pub struct HudState {
 impl Default for HudState {
     fn default() -> Self {
         Self {
+            class: CharacterClass::Knight,
             mana_current: 60,
             mana_max: 60,
             level: 1,
@@ -82,6 +97,9 @@ impl Default for DialogState {
 pub struct LoginMenuRoot;
 
 #[derive(Component)]
+pub struct LoginClassTextUi;
+
+#[derive(Component)]
 pub struct PlayerHealthBarUi;
 
 #[derive(Component)]
@@ -105,10 +123,17 @@ pub struct DialogTextUi;
 #[derive(Component)]
 pub struct DialogPanelUi;
 
-pub fn setup_login_menu(mut commands: Commands, login_name: Option<Res<LoginName>>) {
+pub fn setup_login_menu(
+    mut commands: Commands,
+    login_name: Option<Res<LoginName>>,
+    login_class: Option<Res<LoginClassSelection>>,
+) {
     let username = login_name
         .map(|value| value.username.clone())
         .unwrap_or_else(|| "adventurer".to_string());
+    let selected_class = login_class
+        .map(|value| value.class)
+        .unwrap_or(CharacterClass::Knight);
     commands.spawn((
         LoginMenuRoot,
         Node {
@@ -136,6 +161,14 @@ pub fn setup_login_menu(mut commands: Commands, login_name: Option<Res<LoginName
                     TextFont::from_font_size(22.0)
                 ),
                 (
+                    LoginClassTextUi,
+                    Text::new(format!(
+                        "Class: {} (Press 1-5 to select)",
+                        class_label(selected_class)
+                    )),
+                    TextFont::from_font_size(20.0)
+                ),
+                (
                     Text::new("Press Enter to Login"),
                     TextFont::from_font_size(18.0)
                 )
@@ -147,8 +180,25 @@ pub fn setup_login_menu(mut commands: Commands, login_name: Option<Res<LoginName
 pub fn login_submit_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     login_name: Option<ResMut<LoginName>>,
+    login_class: Option<ResMut<LoginClassSelection>>,
     network: Option<Res<network::ClientNetwork>>,
 ) {
+    let Some(mut login_class) = login_class else {
+        return;
+    };
+
+    if keyboard.just_pressed(KeyCode::Digit1) {
+        login_class.class = CharacterClass::Prince;
+    } else if keyboard.just_pressed(KeyCode::Digit2) {
+        login_class.class = CharacterClass::Knight;
+    } else if keyboard.just_pressed(KeyCode::Digit3) {
+        login_class.class = CharacterClass::Elf;
+    } else if keyboard.just_pressed(KeyCode::Digit4) {
+        login_class.class = CharacterClass::Wizard;
+    } else if keyboard.just_pressed(KeyCode::Digit5) {
+        login_class.class = CharacterClass::DarkElf;
+    }
+
     if !keyboard.just_pressed(KeyCode::Enter) {
         return;
     }
@@ -167,13 +217,42 @@ pub fn login_submit_system(
         &network,
         LoginRequest {
             username: login_name.username.clone(),
+            class: login_class.class,
         },
     );
+}
+
+pub fn update_login_menu_class_text_system(
+    login_class: Option<Res<LoginClassSelection>>,
+    mut texts: Query<&mut Text, With<LoginClassTextUi>>,
+) {
+    let Some(login_class) = login_class else {
+        return;
+    };
+    if !login_class.is_changed() {
+        return;
+    }
+    for mut text in &mut texts {
+        *text = Text::new(format!(
+            "Class: {} (Press 1-5 to select)",
+            class_label(login_class.class)
+        ));
+    }
 }
 
 pub fn cleanup_login_menu(mut commands: Commands, roots: Query<Entity, With<LoginMenuRoot>>) {
     for root in &roots {
         commands.entity(root).despawn();
+    }
+}
+
+pub fn class_label(class: CharacterClass) -> &'static str {
+    match class {
+        CharacterClass::Prince => "Prince",
+        CharacterClass::Knight => "Knight",
+        CharacterClass::Elf => "Elf",
+        CharacterClass::Wizard => "Wizard",
+        CharacterClass::DarkElf => "Dark Elf",
     }
 }
 

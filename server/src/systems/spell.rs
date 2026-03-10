@@ -1,6 +1,9 @@
 use bevy::prelude::*;
 use shared::protocol::{HealEvent, ManaUpdate};
-use shared::{spell_def, CombatStats, Health, Level, Mana, Position, SpellCooldowns, SpellType};
+use shared::{
+    class_def, spell_def, CharacterClass, CombatStats, Health, Level, Mana, Position,
+    SpellCooldowns, SpellType,
+};
 
 use crate::network;
 
@@ -42,6 +45,7 @@ pub fn cast_spell_system(
             &Position,
             &mut Mana,
             &Level,
+            &CharacterClass,
             &mut SpellCooldowns,
             &CombatStats,
             &mut Health,
@@ -62,6 +66,7 @@ pub fn cast_spell_system(
             caster_position,
             mut mana,
             level,
+            player_class,
             mut cooldowns,
             caster_stats,
             mut self_health,
@@ -72,6 +77,9 @@ pub fn cast_spell_system(
 
         let spell = spell_def(request.spell);
         if level.current < spell.req_level {
+            continue;
+        }
+        if !class_def(*player_class).can_cast.contains(&request.spell) {
             continue;
         }
         if mana.current < spell.mana_cost {

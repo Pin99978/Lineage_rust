@@ -4,7 +4,7 @@ use shared::protocol::{
     ClientMessage, EntityState, EquipIntent, InteractNpcIntent, LoginRequest, LootIntent,
     NetworkEntityKind, ServerMessage, UnequipIntent, UseItemIntent,
 };
-use shared::{EquipmentSlot, Health, ItemType, Position, SpellType, MAP_TOWN};
+use shared::{CharacterClass, EquipmentSlot, Health, ItemType, Position, SpellType, MAP_TOWN};
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 
@@ -205,6 +205,7 @@ pub fn receive_server_state(
                 hud_state.level = 1;
                 hud_state.exp_current = 0;
                 hud_state.exp_next = 100;
+                hud_state.class = CharacterClass::Knight;
                 hud_state.str_stat = 15;
                 hud_state.dex = 15;
                 hud_state.int_stat = 15;
@@ -236,6 +237,7 @@ pub fn receive_server_state(
                 }
                 if local_player.id == Some(state.entity_id) {
                     local_player.map_id = state.map_id.clone();
+                    hud_state.class = state.class;
                 }
                 apply_entity_state(
                     &mut commands,
